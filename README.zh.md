@@ -32,8 +32,18 @@ pnpm add -g feishu-codex-bridge
 
 ## 首次启动
 
+全局安装后：
+
 ```bash
 feishu-codex-bridge start
+```
+
+从源码目录本地验证时：
+
+```bash
+corepack pnpm start
+# 或
+node bin/feishu-codex-bridge.mjs start
 ```
 
 第一次跑会检测到没配置应用，**自动进入扫码向导**：

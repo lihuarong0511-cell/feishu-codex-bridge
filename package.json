@@ -20,6 +20,7 @@
     "LICENSE"
   ],
   "scripts": {
+    "start": "node bin/feishu-codex-bridge.mjs start",
     "dev": "tsup --watch",
     "build": "tsup",
     "typecheck": "tsc --noEmit",

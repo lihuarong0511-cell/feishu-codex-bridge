@@ -32,8 +32,18 @@ pnpm add -g feishu-codex-bridge
 
 ## First run
 
+After global install:
+
 ```bash
 feishu-codex-bridge start
+```
+
+For local source validation:
+
+```bash
+corepack pnpm start
+# or
+node bin/feishu-codex-bridge.mjs start
 ```
 
 The first run detects there's no app configured and **opens a QR-code wizard**:
