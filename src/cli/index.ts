@@ -8,6 +8,7 @@ import {
   runSecretsRemove,
   runSecretsSet,
 } from './commands/secrets';
+import { runService } from './commands/service';
 import { runStart } from './commands/start';
 
 const program = new Command();
@@ -114,10 +115,12 @@ program
   });
 
 program
-  .command('service <action> <type>')
-  .description('Install or uninstall autostart service: launchd | systemd')
-  .action(async (_action: string, _type: string) => {
-    console.log('service: not implemented yet');
+  .command('service <action> [type]')
+  .description('Manage macOS launchd service: install | status | logs | restart | uninstall')
+  .option('-c, --config <path>', 'config path to pass to `start` when installing')
+  .option('-f, --follow', 'follow logs for `service logs`')
+  .action(async (action: string, type: string | undefined, opts: { config?: string; follow?: boolean }) => {
+    await runService(action, type, opts);
   });
 
 program.parseAsync(process.argv).catch((err: unknown) => {

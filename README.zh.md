@@ -80,12 +80,40 @@ node bin/feishu-codex-bridge.mjs start
 feishu-codex-bridge start [-c <config>]   启动 bot
 feishu-codex-bridge ps                    列出本机所有正在跑的 start 进程
 feishu-codex-bridge stop <id|#>           终止指定 start 进程（SIGTERM，2s 后 SIGKILL）
+feishu-codex-bridge service install launchd   安装 macOS 后台常驻服务
 feishu-codex-bridge --help                列所有命令
 ```
 
 > 多开同一个 app 时，开放平台会把事件随机推到其中一个长连接。`start` 启动前会检测同 app 已有的进程，TTY 下提示 `[c]ontinue / [k]ill old / [a]bort` 三选；非 TTY 只 warn 并继续。
 
-其它命令（`status` / `doctor` / `handover` / `workspace` / `service`）是占位，后续版本补。
+其它命令（`status` / `doctor` / `handover` / `workspace`）是占位，后续版本补。
+
+### macOS 后台常驻
+
+不想一直开着 terminal 时，可以安装 `launchd` 服务：
+
+```bash
+feishu-codex-bridge service install launchd
+```
+
+从源码目录验证时，用当前源码入口安装：
+
+```bash
+cd /Users/bytedance/Documents/feishu-codex-bridge
+node bin/feishu-codex-bridge.mjs service install launchd
+```
+
+常用管理命令：
+
+```bash
+feishu-codex-bridge service status
+feishu-codex-bridge service logs
+feishu-codex-bridge service logs --follow
+feishu-codex-bridge service restart
+feishu-codex-bridge service uninstall
+```
+
+服务日志写到 `~/.feishu-codex-bridge/service.log` 和 `~/.feishu-codex-bridge/service.err.log`。安装时会把当前 shell 的 `PATH` 写入 launchd 配置，确保后台进程能找到 `codex`。
 
 ### 在飞书里用的斜杠命令
 

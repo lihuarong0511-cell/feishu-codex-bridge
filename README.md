@@ -80,12 +80,40 @@ After enabling those, run `feishu-codex-bridge start` again. Once you see `✓ C
 feishu-codex-bridge start [-c <config>]   Start the bot
 feishu-codex-bridge ps                    List all running start processes on this machine
 feishu-codex-bridge stop <id|#>           Stop a start process (SIGTERM, SIGKILL after 2s)
+feishu-codex-bridge service install launchd   Install a macOS background service
 feishu-codex-bridge --help                List all commands
 ```
 
 > When the same app is started multiple times, Lark's open platform routes events to one of the live WebSocket connections at random. `start` detects existing processes for the same app and (in a TTY) prompts: `[c]ontinue / [k]ill old / [a]bort`. In non-TTY mode it warns and continues.
 
-`status` / `doctor` / `handover` / `workspace` / `service` are placeholders, planned for later releases.
+`status` / `doctor` / `handover` / `workspace` are placeholders, planned for later releases.
+
+### macOS Background Service
+
+If you do not want to keep a terminal open, install a `launchd` service:
+
+```bash
+feishu-codex-bridge service install launchd
+```
+
+For local source validation, install the service with the current source entry:
+
+```bash
+cd /Users/bytedance/Documents/feishu-codex-bridge
+node bin/feishu-codex-bridge.mjs service install launchd
+```
+
+Common management commands:
+
+```bash
+feishu-codex-bridge service status
+feishu-codex-bridge service logs
+feishu-codex-bridge service logs --follow
+feishu-codex-bridge service restart
+feishu-codex-bridge service uninstall
+```
+
+Service logs go to `~/.feishu-codex-bridge/service.log` and `~/.feishu-codex-bridge/service.err.log`. The installer writes your current shell `PATH` into the launchd plist so the background process can find `codex`.
 
 ### Slash commands inside Feishu / Lark
 
