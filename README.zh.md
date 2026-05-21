@@ -17,11 +17,13 @@ feishu-codex-bridge start
 
 首次启动会进入 onboarding：
 
-1. 终端显示二维码，用飞书 / Lark 扫码。
-2. 创建或选择一个 PersonalAgent 应用。
-3. bridge 保存应用配置，并把 App Secret 放进本地加密 keystore。
-4. bridge 检查 `lark-cli`，没有就安装到 `~/.feishu-codex-bridge/lark-cli`。
-5. bridge 用同一个 App ID 初始化 `lark-cli`，不会为 `lark-cli` 新建第二个应用。
+1. 检查 `codex`；没有就把官方包 `@openai/codex` 安装到 `~/.feishu-codex-bridge/codex-cli`。
+2. 检查 Codex 登录状态；没登录时引导运行 `codex login`。
+3. 终端显示二维码，用飞书 / Lark 扫码。
+4. 创建或选择一个 PersonalAgent 应用。
+5. bridge 保存应用配置，并把 App Secret 放进本地加密 keystore。
+6. 检查 `lark-cli`；没有就安装到 `~/.feishu-codex-bridge/lark-cli`。
+7. bridge 用同一个 App ID 初始化 `lark-cli`，不会为 `lark-cli` 新建第二个应用。
 
 启动成功后，在飞书私聊 bot：
 
@@ -55,18 +57,19 @@ Feishu/Lark chat
 需要：
 
 - Node.js >= 20
-- 本机已安装并登录 `codex` CLI
 - 一个飞书 / Lark PersonalAgent 应用，首次启动时可以扫码创建
 
-不需要提前安装 `lark-cli`。bridge 会安装到自己的私有目录，避免公司电脑没有 `/usr/local` 写权限的问题：
+不需要提前安装 `codex` 或 `lark-cli`。bridge 会安装到自己的私有目录，避免公司电脑没有 `/usr/local` 写权限的问题：
 
 ```bash
+~/.feishu-codex-bridge/codex-cli
 ~/.feishu-codex-bridge/lark-cli
 ```
 
-如果你想在普通 Terminal 里直接使用 `lark-cli`，手动加 PATH：
+如果你想在普通 Terminal 里直接使用这些私有安装的 CLI，手动加 PATH：
 
 ```bash
+export PATH="$HOME/.feishu-codex-bridge/codex-cli/node_modules/.bin:$PATH"
 export PATH="$HOME/.feishu-codex-bridge/lark-cli/node_modules/.bin:$PATH"
 ```
 
@@ -130,7 +133,7 @@ bot 身份可用不等于用户 OAuth 已完成。很多租户级 API 可以用 
 
 ## 后台常驻
 
-先前台跑一次 `start`，完成扫码、`lark-cli` 安装和同应用绑定。然后安装 macOS `launchd` 服务：
+先前台跑一次 `start`，完成 Codex 检查、扫码、`lark-cli` 安装和同应用绑定。然后安装 macOS `launchd` 服务：
 
 ```bash
 feishu-codex-bridge service install launchd
@@ -169,6 +172,7 @@ lark-cli config init --new
 | `~/.feishu-codex-bridge/sessions.json` | chat / 话题到 Codex session 的映射 |
 | `~/.feishu-codex-bridge/workspaces.json` | 命名工作空间 |
 | `~/.feishu-codex-bridge/processes.json` | 正在运行的 bridge 进程注册表 |
+| `~/.feishu-codex-bridge/codex-cli/` | bridge 私有安装的 Codex CLI |
 | `~/.feishu-codex-bridge/lark-cli/` | bridge 私有安装的 Lark CLI |
 | `~/.feishu-codex-bridge/logs/YYYY-MM-DD.log` | bridge 结构化运行日志 |
 | `~/.feishu-codex-bridge/media/<chatId>/` | 下载的图片和文件缓存，24h 清理 |
@@ -219,6 +223,22 @@ feishu-codex-bridge service status
 ```bash
 feishu-codex-bridge service logs --follow
 ```
+
+**Codex CLI 缺失或没登录**
+
+先跑：
+
+```bash
+feishu-codex-bridge doctor
+```
+
+需要修复时，重新前台跑 onboarding：
+
+```bash
+feishu-codex-bridge start
+```
+
+它会把 Codex CLI 安装到 `~/.feishu-codex-bridge/codex-cli`，并引导 `codex login`。
 
 **Codex 说找不到 `lark-cli`**
 

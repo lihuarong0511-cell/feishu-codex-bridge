@@ -17,11 +17,13 @@ feishu-codex-bridge start
 
 The first start runs onboarding:
 
-1. Scan the QR code with Feishu / Lark.
-2. Create or select a PersonalAgent app.
-3. The bridge saves app config and moves the App Secret into a local encrypted keystore.
-4. The bridge checks `lark-cli`; if missing, it installs it into `~/.feishu-codex-bridge/lark-cli`.
-5. The bridge initializes `lark-cli` with the same App ID. It does not create a second app for `lark-cli`.
+1. Check `codex`; if missing, install the official `@openai/codex` package into `~/.feishu-codex-bridge/codex-cli`.
+2. Check Codex login status; if needed, guide you through `codex login`.
+3. Scan the QR code with Feishu / Lark.
+4. Create or select a PersonalAgent app.
+5. The bridge saves app config and moves the App Secret into a local encrypted keystore.
+6. Check `lark-cli`; if missing, install it into `~/.feishu-codex-bridge/lark-cli`.
+7. Initialize `lark-cli` with the same App ID. It does not create a second app for `lark-cli`.
 
 After startup, DM the bot:
 
@@ -55,18 +57,19 @@ Responsibilities are split:
 You need:
 
 - Node.js >= 20
-- `codex` CLI installed and logged in
 - A Feishu / Lark PersonalAgent app; the first-run QR wizard can create one
 
-You do not need to preinstall `lark-cli`. The bridge installs it into a private directory to avoid `/usr/local` permission issues on managed company machines:
+You do not need to preinstall `codex` or `lark-cli`. The bridge installs missing CLIs into private directories to avoid `/usr/local` permission issues on managed company machines:
 
 ```bash
+~/.feishu-codex-bridge/codex-cli
 ~/.feishu-codex-bridge/lark-cli
 ```
 
-For direct terminal usage:
+For direct terminal usage of the private CLI installs:
 
 ```bash
+export PATH="$HOME/.feishu-codex-bridge/codex-cli/node_modules/.bin:$PATH"
 export PATH="$HOME/.feishu-codex-bridge/lark-cli/node_modules/.bin:$PATH"
 ```
 
@@ -130,7 +133,7 @@ Bot identity being ready does not mean user OAuth is complete. Tenant/bot APIs c
 
 ## Background Service
 
-Run `start` once in the foreground so QR setup, private `lark-cli` install, and same-app binding can complete. Then install the macOS `launchd` service:
+Run `start` once in the foreground so Codex checks, QR setup, private `lark-cli` install, and same-app binding can complete. Then install the macOS `launchd` service:
 
 ```bash
 feishu-codex-bridge service install launchd
@@ -169,6 +172,7 @@ Otherwise bot messages, API permissions, and OAuth identities are split across a
 | `~/.feishu-codex-bridge/sessions.json` | Chat/topic to Codex session mapping |
 | `~/.feishu-codex-bridge/workspaces.json` | Named workspaces |
 | `~/.feishu-codex-bridge/processes.json` | Live bridge process registry |
+| `~/.feishu-codex-bridge/codex-cli/` | Bridge-managed private Codex CLI install |
 | `~/.feishu-codex-bridge/lark-cli/` | Bridge-managed private Lark CLI install |
 | `~/.feishu-codex-bridge/logs/YYYY-MM-DD.log` | Structured runtime logs |
 | `~/.feishu-codex-bridge/media/<chatId>/` | Downloaded image/file cache, cleaned after 24h |
@@ -219,6 +223,22 @@ Follow logs:
 ```bash
 feishu-codex-bridge service logs --follow
 ```
+
+**Codex CLI is missing or not logged in**
+
+Run:
+
+```bash
+feishu-codex-bridge doctor
+```
+
+If needed, rerun foreground onboarding:
+
+```bash
+feishu-codex-bridge start
+```
+
+It can install Codex CLI into `~/.feishu-codex-bridge/codex-cli` and run `codex login`.
 
 **Codex cannot find `lark-cli`**
 

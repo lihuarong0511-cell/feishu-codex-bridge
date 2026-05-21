@@ -27,6 +27,7 @@ import {
 } from '../../runtime/registry';
 import { SessionStore } from '../../session/store';
 import { WorkspaceStore } from '../../workspace/store';
+import { ensureCodexCliOnboarded } from './codex-cli-onboarding';
 import { ensureLarkCliOnboarded } from './lark-cli-onboarding';
 
 // Prefer IPv4 — Node 20+ defaults to "verbatim" which respects whatever
@@ -54,6 +55,10 @@ export interface StartOptions {
 }
 
 export async function runStart(opts: StartOptions): Promise<void> {
+  if (!(await ensureCodexCliOnboarded())) {
+    process.exit(1);
+  }
+
   const configPath = opts.config ?? paths.configFile;
   const existing = await loadConfig(configPath);
 
@@ -79,11 +84,6 @@ export async function runStart(opts: StartOptions): Promise<void> {
   }
 
   const agent = new CodexAdapter();
-  if (!(await agent.isAvailable())) {
-    console.error('✗ 未找到 codex CLI。请先安装并登录 Codex CLI：');
-    console.error('  https://developers.openai.com/codex/cli');
-    process.exit(1);
-  }
 
   const sessions = new SessionStore();
   await sessions.load();

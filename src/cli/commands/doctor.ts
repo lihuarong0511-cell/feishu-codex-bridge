@@ -1,7 +1,7 @@
-import { CodexAdapter } from '../../agent/codex/adapter';
 import { paths } from '../../config/paths';
 import { isComplete } from '../../config/schema';
 import { loadConfig } from '../../config/store';
+import { printCodexCliDoctor } from './codex-cli-onboarding';
 import { printLarkCliDoctor } from './lark-cli-onboarding';
 
 export interface DoctorOptions {
@@ -18,7 +18,6 @@ export async function runDoctor(opts: DoctorOptions): Promise<void> {
   }
 
   console.log(`bridge config: ${cfg.accounts.app.id} (${cfg.accounts.app.tenant})`);
-  const codex = new CodexAdapter();
-  console.log(`codex CLI: ${(await codex.isAvailable()) ? '已安装' : '未找到'}`);
+  await printCodexCliDoctor();
   await printLarkCliDoctor(cfg);
 }
