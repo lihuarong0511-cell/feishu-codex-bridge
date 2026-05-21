@@ -2,6 +2,8 @@
 
 把飞书 / Lark 消息和本地 Codex CLI 打通的轻量 bot，用一条命令起服务，扫码绑应用，在飞书里和 Codex 对话、让它读图 / 改代码。
 
+本项目参考 [zarazhangrui/feishu-claude-code-bridge](https://github.com/zarazhangrui/feishu-claude-code-bridge) 制作，感谢原项目的设计和实现启发。
+
 [English README](./README.md)
 
 ## 能干什么
