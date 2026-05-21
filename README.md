@@ -116,20 +116,20 @@ Bot identity being ready does not mean user OAuth is complete. Tenant/bot APIs c
 
 | Command | Effect |
 |---|---|
-| `/status` | Show cwd, session, agent, and reasoning effort |
-| `/new` / `/reset` | Reset the current chat’s Codex session |
-| `/resume [N]` | List and resume recent Codex sessions under the current cwd |
-| `/cd <path>` | Change cwd for the current chat and reset the session |
-| `/ws list/save/use/remove` | Manage named workspaces |
-| `/config` | Adjust reply mode, tools, concurrency, timeout, reasoning effort, access control |
-| `/timeout [N|off|default]` | Override idle timeout for the current session |
-| `/stop` | Stop the current Codex run |
-| `/ps` | List bridge processes on this host |
-| `/exit <id|#>` | Stop a bridge process |
-| `/reconnect` | Reconnect the Feishu / Lark WebSocket |
-| `/doctor [description]` | Ask Codex to diagnose recent bridge logs |
-| `/account` | View or change the Feishu / Lark app used by the bridge |
-| `/help` | Show the help card |
+| <code>/status</code> | Show cwd, session, agent, and reasoning effort |
+| <code>/new</code> / <code>/reset</code> | Reset the current chat’s Codex session |
+| <code>/resume [N]</code> | List and resume recent Codex sessions under the current cwd |
+| <code>/cd &lt;path&gt;</code> | Change cwd for the current chat and reset the session |
+| <code>/ws list/save/use/remove</code> | Manage named workspaces |
+| <code>/config</code> | Adjust reply mode, tools, concurrency, timeout, reasoning effort, access control |
+| <code>/timeout [N&#124;off&#124;default]</code> | Override idle timeout for the current session |
+| <code>/stop</code> | Stop the current Codex run |
+| <code>/ps</code> | List bridge processes on this host |
+| <code>/exit &lt;id&#124;#&gt;</code> | Stop a bridge process |
+| <code>/reconnect</code> | Reconnect the Feishu / Lark WebSocket |
+| <code>/doctor [description]</code> | Ask Codex to diagnose recent bridge logs |
+| <code>/account</code> | View or change the Feishu / Lark app used by the bridge |
+| <code>/help</code> | Show the help card |
 
 ## Background Service
 

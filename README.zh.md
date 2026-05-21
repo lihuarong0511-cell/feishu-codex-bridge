@@ -116,20 +116,20 @@ bot 身份可用不等于用户 OAuth 已完成。很多租户级 API 可以用 
 
 | 命令 | 作用 |
 |---|---|
-| `/status` | 查看当前 cwd、session、agent、reasoning effort |
-| `/new` / `/reset` | 重置当前 chat 的 Codex session |
-| `/resume [N]` | 列出并恢复当前 cwd 下的历史 Codex session |
-| `/cd <path>` | 切换当前 chat 的工作目录，并重置 session |
-| `/ws list/save/use/remove` | 管理命名工作空间 |
-| `/config` | 调整回复、工具显示、并发、timeout、reasoning effort、访问控制 |
-| `/timeout [N|off|default]` | 当前 session 的 idle timeout 覆盖 |
-| `/stop` | 停止当前正在跑的 Codex 任务 |
-| `/ps` | 列出本机 bridge 进程 |
-| `/exit <id|#>` | 关闭指定 bridge 进程 |
-| `/reconnect` | 重连飞书 WebSocket |
-| `/doctor [描述]` | 把近期 bridge 日志交给 Codex 做故障诊断 |
-| `/account` | 查看或更换 bridge 使用的飞书应用 |
-| `/help` | 查看帮助卡片 |
+| <code>/status</code> | 查看当前 cwd、session、agent、reasoning effort |
+| <code>/new</code> / <code>/reset</code> | 重置当前 chat 的 Codex session |
+| <code>/resume [N]</code> | 列出并恢复当前 cwd 下的历史 Codex session |
+| <code>/cd &lt;path&gt;</code> | 切换当前 chat 的工作目录，并重置 session |
+| <code>/ws list/save/use/remove</code> | 管理命名工作空间 |
+| <code>/config</code> | 调整回复、工具显示、并发、timeout、reasoning effort、访问控制 |
+| <code>/timeout [N&#124;off&#124;default]</code> | 当前 session 的 idle timeout 覆盖 |
+| <code>/stop</code> | 停止当前正在跑的 Codex 任务 |
+| <code>/ps</code> | 列出本机 bridge 进程 |
+| <code>/exit &lt;id&#124;#&gt;</code> | 关闭指定 bridge 进程 |
+| <code>/reconnect</code> | 重连飞书 WebSocket |
+| <code>/doctor [描述]</code> | 把近期 bridge 日志交给 Codex 做故障诊断 |
+| <code>/account</code> | 查看或更换 bridge 使用的飞书应用 |
+| <code>/help</code> | 查看帮助卡片 |
 
 ## 后台常驻
 
