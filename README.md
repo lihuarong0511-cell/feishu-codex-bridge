@@ -236,7 +236,7 @@ Find IDs from logs:
 grep '"event":"enter"' ~/.feishu-codex-bridge/logs/$(date +%Y-%m-%d).log | tail -5
 ```
 
-## Troubleshooting
+## Common Fixes
 
 **Bot is silent**
 
@@ -285,7 +285,9 @@ Send `/stop` in chat. For recurring hangs, set a global idle timeout in `/config
 /timeout 10
 ```
 
-## Development
+## Source Validation And Local Changes
+
+You can skip this section when using the published package. These commands are for local source changes, validation, and release preparation.
 
 ```bash
 corepack pnpm install

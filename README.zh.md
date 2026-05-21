@@ -24,7 +24,7 @@ Feishu/Lark chat
 - **Codex CLI**：理解用户意图、读写本机项目、执行命令、延续 Codex session。
 - **Lark CLI**：让 Codex 访问飞书 API，例如消息、云文档、日历、群管理和 OAuth。
 
-关键约束：**bridge 和 `lark-cli` 必须使用同一个飞书 / Lark 应用**。不要为 `lark-cli` 另建应用，否则 bot 收消息、API 权限、OAuth 用户身份会分散到不同 app，排障会非常混乱。
+关键约束：**bridge 和 `lark-cli` 必须使用同一个飞书 / Lark 应用**。不要为 `lark-cli` 另建应用，否则 bot 收消息、API 权限、OAuth 用户身份会分散到不同 app，后面很难查问题。
 
 ## 能力范围
 
@@ -236,7 +236,7 @@ node bin/feishu-codex-bridge.mjs service uninstall
 grep '"event":"enter"' ~/.feishu-codex-bridge/logs/$(date +%Y-%m-%d).log | tail -5
 ```
 
-## 排障
+## 故障排查
 
 **bot 没反应**
 
@@ -285,7 +285,9 @@ node bin/feishu-codex-bridge.mjs start
 /timeout 10
 ```
 
-## 开发
+## 从源码验证或二次开发
+
+如果是直接使用发布包，不需要看这一节。只有在本地改源码、验证改动、或者准备发版时才需要跑这些命令。
 
 ```bash
 corepack pnpm install
