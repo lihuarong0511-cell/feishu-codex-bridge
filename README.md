@@ -41,6 +41,8 @@ feishu-codex-bridge start
 For local source validation:
 
 ```bash
+cd /Users/bytedance/Documents/feishu-codex-bridge
+corepack pnpm install
 corepack pnpm start
 # or
 node bin/feishu-codex-bridge.mjs start

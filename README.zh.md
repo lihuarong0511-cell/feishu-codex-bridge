@@ -41,6 +41,8 @@ feishu-codex-bridge start
 从源码目录本地验证时：
 
 ```bash
+cd /Users/bytedance/Documents/feishu-codex-bridge
+corepack pnpm install
 corepack pnpm start
 # 或
 node bin/feishu-codex-bridge.mjs start
