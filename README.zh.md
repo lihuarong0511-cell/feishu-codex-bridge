@@ -27,10 +27,28 @@ feishu-codex-bridge start
 
 ```text
 /status
-hi
+帮我看一下这个项目
 ```
 
+`/status` 是启动后的快速自检，用来看当前 cwd、Codex session、agent 和 reasoning effort。普通文本消息会交给 Codex 处理。
+
 群聊和话题群默认需要 `@bot` 才会响应。
+
+bridge 本地启动一个长连接 bot，把每条飞书消息转成一次本机 Codex 调用：
+
+```text
+Feishu/Lark chat
+  -> bridge WebSocket
+  -> local codex exec / resume
+  -> optional lark-cli calls
+  -> streaming card / text reply
+```
+
+三层能力各自分工：
+
+- **bridge**：收发消息、会话映射、卡片流式更新、附件下载、后台常驻。
+- **Codex CLI**：理解用户意图、读写本机项目、执行命令、延续 Codex session。
+- **Lark CLI**：让 Codex 访问飞书 API，例如消息、云文档、日历、群管理和 OAuth。
 
 ## 前置条件
 
@@ -71,21 +89,6 @@ export PATH="$HOME/.feishu-codex-bridge/lark-cli/node_modules/.bin:$PATH"
 - `drive.notice.comment_add_v1`，云文档 `@bot` 需要
 - `im.message.reaction.created_v1` / `deleted_v1`，可选
 - `im.chat.member.bot.added_v1`，可选
-
-## 验证
-
-本机检查：
-
-```bash
-feishu-codex-bridge doctor
-```
-
-应该看到：
-
-- bridge config 指向当前 App ID
-- Codex CLI 已安装
-- `lark-cli` 已安装
-- `lark-cli` 的 App ID 与 bridge 一致
 
 如果要让 Codex 访问你的个人聊天记录、日历、云文档等用户资源，再做用户 OAuth：
 
@@ -200,24 +203,6 @@ lark-cli config init --new
 grep '"event":"enter"' ~/.feishu-codex-bridge/logs/$(date +%Y-%m-%d).log | tail -5
 ```
 
-## 工作原理
-
-bridge 本地启动一个长连接 bot，把飞书消息转成 `codex exec` 或 `codex exec resume`：
-
-```text
-Feishu/Lark chat
-  -> bridge WebSocket
-  -> local codex exec / resume
-  -> optional lark-cli calls
-  -> streaming card / text reply
-```
-
-三层能力各自分工：
-
-- **bridge**：收发消息、会话映射、卡片流式更新、附件下载、后台常驻。
-- **Codex CLI**：理解用户意图、读写本机项目、执行命令、延续 Codex session。
-- **Lark CLI**：让 Codex 访问飞书 API，例如消息、云文档、日历、群管理和 OAuth。
-
 ## 故障排查
 
 **bot 没反应**
@@ -265,19 +250,6 @@ feishu-codex-bridge start
 
 ```text
 /timeout 10
-```
-
-## 从源码验证或二次开发
-
-如果只是使用，不需要看这一节。只有在本地改源码、验证改动、或者准备发版时才需要跑这些命令。
-
-```bash
-git clone https://github.com/QQQingyu/feishu-codex-bridge.git
-cd feishu-codex-bridge
-corepack pnpm install
-corepack pnpm run typecheck
-corepack pnpm run test
-corepack pnpm run build
 ```
 
 ## License

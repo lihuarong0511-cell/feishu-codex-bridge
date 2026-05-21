@@ -27,10 +27,28 @@ After startup, DM the bot:
 
 ```text
 /status
-hi
+Help me inspect this repo
 ```
 
+`/status` is a quick health check. It shows the current cwd, Codex session, active agent, and reasoning effort. Regular messages are sent to Codex.
+
 In groups and topic groups, the default policy is to respond only when mentioned.
+
+The bridge keeps a local long-lived bot process and turns each chat message into a local Codex run:
+
+```text
+Feishu/Lark chat
+  -> bridge WebSocket
+  -> local codex exec / resume
+  -> optional lark-cli calls
+  -> streaming card / text reply
+```
+
+Responsibilities are split:
+
+- **bridge** receives events, maps chats to sessions, downloads attachments, renders cards, and keeps the bot alive.
+- **Codex CLI** reasons, edits files, runs commands, and resumes Codex sessions.
+- **Lark CLI** gives Codex a practical API tool for messages, docs, calendars, groups, OAuth, and other Lark resources.
 
 ## Requirements
 
@@ -71,21 +89,6 @@ Event subscriptions, long-connection mode:
 - `drive.notice.comment_add_v1`, required for cloud-doc `@bot` comments
 - `im.message.reaction.created_v1` / `deleted_v1`, optional
 - `im.chat.member.bot.added_v1`, optional
-
-## Verify
-
-Check local setup:
-
-```bash
-feishu-codex-bridge doctor
-```
-
-Expected:
-
-- bridge config points to the current App ID
-- Codex CLI is available
-- `lark-cli` is installed
-- `lark-cli` App ID matches the bridge App ID
 
 User OAuth is only needed when Codex must access personal resources such as your own chat history, docs, or calendar:
 
@@ -200,24 +203,6 @@ Find IDs from logs:
 grep '"event":"enter"' ~/.feishu-codex-bridge/logs/$(date +%Y-%m-%d).log | tail -5
 ```
 
-## How It Works
-
-The bridge keeps a local long-lived bot process and turns chat messages into local Codex runs:
-
-```text
-Feishu/Lark chat
-  -> bridge WebSocket
-  -> local codex exec / resume
-  -> optional lark-cli calls
-  -> streaming card / text reply
-```
-
-Responsibilities are split:
-
-- **bridge** receives events, maps chats to sessions, downloads attachments, renders cards, and keeps the bot alive.
-- **Codex CLI** reasons, edits files, runs commands, and resumes Codex sessions.
-- **Lark CLI** gives Codex a practical API tool for messages, docs, calendars, groups, OAuth, and other Lark resources.
-
 ## Common Fixes
 
 **Bot is silent**
@@ -265,19 +250,6 @@ Send `/stop` in chat. For recurring hangs, set a global idle timeout in `/config
 
 ```text
 /timeout 10
-```
-
-## Source Validation And Local Changes
-
-You can skip this section when only using the bridge. These commands are for local source changes, validation, and release preparation.
-
-```bash
-git clone https://github.com/QQQingyu/feishu-codex-bridge.git
-cd feishu-codex-bridge
-corepack pnpm install
-corepack pnpm run typecheck
-corepack pnpm run test
-corepack pnpm run build
 ```
 
 ## License
