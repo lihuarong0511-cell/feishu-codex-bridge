@@ -8,18 +8,6 @@ This project is built with reference to [zarazhangrui/feishu-claude-code-bridge]
 
 ## Install
 
-This package is **not published to npm yet**. For now, run it from source:
-
-```bash
-git clone https://github.com/QQQingyu/feishu-codex-bridge.git
-cd feishu-codex-bridge
-corepack pnpm install
-corepack pnpm build
-node bin/feishu-codex-bridge.mjs start
-```
-
-After the package is published to npm, this will become available:
-
 ```bash
 npm i -g feishu-codex-bridge
 feishu-codex-bridge start
@@ -89,7 +77,7 @@ Event subscriptions, long-connection mode:
 Check local setup:
 
 ```bash
-node bin/feishu-codex-bridge.mjs doctor
+feishu-codex-bridge doctor
 ```
 
 Expected:
@@ -142,16 +130,16 @@ Bot identity being ready does not mean user OAuth is complete. Tenant/bot APIs c
 Run `start` once in the foreground so QR setup, private `lark-cli` install, and same-app binding can complete. Then install the macOS `launchd` service:
 
 ```bash
-node bin/feishu-codex-bridge.mjs service install launchd
-node bin/feishu-codex-bridge.mjs service status
-node bin/feishu-codex-bridge.mjs service logs --follow
+feishu-codex-bridge service install launchd
+feishu-codex-bridge service status
+feishu-codex-bridge service logs --follow
 ```
 
 Restart or uninstall:
 
 ```bash
-node bin/feishu-codex-bridge.mjs service restart
-node bin/feishu-codex-bridge.mjs service uninstall
+feishu-codex-bridge service restart
+feishu-codex-bridge service uninstall
 ```
 
 Service logs:
@@ -237,14 +225,14 @@ Responsibilities are split:
 Check process and service state:
 
 ```bash
-node bin/feishu-codex-bridge.mjs ps
-node bin/feishu-codex-bridge.mjs service status
+feishu-codex-bridge ps
+feishu-codex-bridge service status
 ```
 
 Follow logs:
 
 ```bash
-node bin/feishu-codex-bridge.mjs service logs --follow
+feishu-codex-bridge service logs --follow
 ```
 
 **Codex cannot find `lark-cli`**
@@ -252,7 +240,7 @@ node bin/feishu-codex-bridge.mjs service logs --follow
 Run:
 
 ```bash
-node bin/feishu-codex-bridge.mjs doctor
+feishu-codex-bridge doctor
 ```
 
 For direct terminal usage:
@@ -266,7 +254,7 @@ export PATH="$HOME/.feishu-codex-bridge/lark-cli/node_modules/.bin:$PATH"
 Run foreground onboarding again:
 
 ```bash
-node bin/feishu-codex-bridge.mjs start
+feishu-codex-bridge start
 ```
 
 Accept the prompt to switch `lark-cli` back to the bridge app. Do not run `lark-cli config init --new`.
@@ -284,6 +272,8 @@ Send `/stop` in chat. For recurring hangs, set a global idle timeout in `/config
 You can skip this section when only using the bridge. These commands are for local source changes, validation, and release preparation.
 
 ```bash
+git clone https://github.com/QQQingyu/feishu-codex-bridge.git
+cd feishu-codex-bridge
 corepack pnpm install
 corepack pnpm run typecheck
 corepack pnpm run test

@@ -8,18 +8,6 @@
 
 ## 安装
 
-当前项目**还没有发布到 npm registry**，先从源码运行：
-
-```bash
-git clone https://github.com/QQQingyu/feishu-codex-bridge.git
-cd feishu-codex-bridge
-corepack pnpm install
-corepack pnpm build
-node bin/feishu-codex-bridge.mjs start
-```
-
-发布到 npm 后，才可以改用：
-
 ```bash
 npm i -g feishu-codex-bridge
 feishu-codex-bridge start
@@ -89,7 +77,7 @@ export PATH="$HOME/.feishu-codex-bridge/lark-cli/node_modules/.bin:$PATH"
 本机检查：
 
 ```bash
-node bin/feishu-codex-bridge.mjs doctor
+feishu-codex-bridge doctor
 ```
 
 应该看到：
@@ -142,16 +130,16 @@ bot 身份可用不等于用户 OAuth 已完成。很多租户级 API 可以用 
 先前台跑一次 `start`，完成扫码、`lark-cli` 安装和同应用绑定。然后安装 macOS `launchd` 服务：
 
 ```bash
-node bin/feishu-codex-bridge.mjs service install launchd
-node bin/feishu-codex-bridge.mjs service status
-node bin/feishu-codex-bridge.mjs service logs --follow
+feishu-codex-bridge service install launchd
+feishu-codex-bridge service status
+feishu-codex-bridge service logs --follow
 ```
 
 重启和卸载：
 
 ```bash
-node bin/feishu-codex-bridge.mjs service restart
-node bin/feishu-codex-bridge.mjs service uninstall
+feishu-codex-bridge service restart
+feishu-codex-bridge service uninstall
 ```
 
 服务日志：
@@ -237,14 +225,14 @@ Feishu/Lark chat
 先查服务是否在跑：
 
 ```bash
-node bin/feishu-codex-bridge.mjs ps
-node bin/feishu-codex-bridge.mjs service status
+feishu-codex-bridge ps
+feishu-codex-bridge service status
 ```
 
 再查日志：
 
 ```bash
-node bin/feishu-codex-bridge.mjs service logs --follow
+feishu-codex-bridge service logs --follow
 ```
 
 **Codex 说找不到 `lark-cli`**
@@ -252,7 +240,7 @@ node bin/feishu-codex-bridge.mjs service logs --follow
 先跑：
 
 ```bash
-node bin/feishu-codex-bridge.mjs doctor
+feishu-codex-bridge doctor
 ```
 
 如果普通 Terminal 里要直接用 `lark-cli`：
@@ -266,7 +254,7 @@ export PATH="$HOME/.feishu-codex-bridge/lark-cli/node_modules/.bin:$PATH"
 重新前台跑：
 
 ```bash
-node bin/feishu-codex-bridge.mjs start
+feishu-codex-bridge start
 ```
 
 按提示切换到 bridge 当前应用。不要运行 `lark-cli config init --new`。
@@ -284,6 +272,8 @@ node bin/feishu-codex-bridge.mjs start
 如果只是使用，不需要看这一节。只有在本地改源码、验证改动、或者准备发版时才需要跑这些命令。
 
 ```bash
+git clone https://github.com/QQQingyu/feishu-codex-bridge.git
+cd feishu-codex-bridge
 corepack pnpm install
 corepack pnpm run typecheck
 corepack pnpm run test
