@@ -16,7 +16,6 @@
     "dist",
     "bin",
     "README.md",
-    "README.zh.md",
     "LICENSE"
   ],
   "scripts": {
@@ -25,6 +24,8 @@
     "build": "tsup",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "prepack": "node tools/npm-readme.mjs prepack",
+    "postpack": "node tools/npm-readme.mjs postpack",
     "prepublishOnly": "npm run typecheck && npm run build"
   },
   "dependencies": {
