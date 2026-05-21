@@ -1,28 +1,67 @@
 # feishu-codex-bridge
 
-A lightweight bot that bridges Feishu / Lark messenger with your local Codex CLI. Run one command, scan a QR code to bind a Lark app, and talk to Codex from chat — read screenshots, edit code, anything you'd do at the terminal.
+A local Feishu / Lark bot that lets you talk to Codex CLI from chat. The bridge handles messaging, sessions, attachments, cards, and process lifecycle; Codex still runs on your machine.
 
 This project is built with reference to [zarazhangrui/feishu-claude-code-bridge](https://github.com/zarazhangrui/feishu-claude-code-bridge), with thanks for the original design and implementation.
 
 [中文 README](./README.zh.md)
 
-## What it does
+## Runtime Model
 
-- Forwards Feishu / Lark messages (DM directly, or `@bot` in a group) to your local `codex` CLI, running in a working directory you control.
-- **Streaming card**: Codex's text and tool calls update on a single Lark card in real time — no waiting for the final reply.
-- **Per-chat sessions**: each chat keeps its own Codex session, so conversations resume where they left off.
-- **Queue + batch**: rapid-fire messages get coalesced into one request; messages sent during a run are merged into the next turn after the current run finishes.
-- **Multiple workspaces**: `/ws` switches between named project directories, with sessions tracked per workspace.
-- **Images and files**: send them to the bot directly — Codex reads the locally downloaded paths.
-- **Interactive cards**: `/help`, `/ws list`, `/status` return cards with buttons you can click.
+The bridge is not a hosted agent service. It keeps a local long-lived bot process and turns chat messages into local Codex runs:
 
-## Prerequisites
+```text
+Feishu/Lark chat
+  -> bridge WebSocket
+  -> local codex exec / resume
+  -> optional lark-cli calls
+  -> streaming card / text reply
+```
 
-- Node.js **>= 20**
-- `codex` CLI installed and logged in — see https://developers.openai.com/codex/cli
-- A Lark / Feishu **PersonalAgent** app (the QR-code wizard on first launch can create one for you).
+Responsibilities are intentionally split:
 
-## Install
+- **bridge** receives events, maps chats to sessions, downloads attachments, renders cards, and keeps the bot alive.
+- **Codex CLI** reasons, edits files, runs commands, and resumes Codex sessions.
+- **Lark CLI** gives Codex a practical API tool for messages, docs, calendars, groups, OAuth, and other Lark resources.
+
+Important: **the bridge and `lark-cli` must use the same Feishu / Lark app**. Do not create a second app for `lark-cli`; otherwise bot identity, permissions, OAuth, and API calls are split across apps.
+
+## Capabilities
+
+- DM the bot directly; in groups and topic groups the default policy is “respond only when mentioned”.
+- Per-chat and per-topic Codex sessions, with `/new` reset and `/resume` recovery.
+- Workspace control through `/cd` and `/ws`.
+- Image and file attachments are downloaded locally and passed to Codex.
+- Streaming markdown/card replies show final text and optional tool-call blocks.
+- `/config` controls reply mode, tool visibility, concurrency, idle timeout, group mention policy, access control, and Codex reasoning effort.
+- `lark-cli` onboarding is mandatory and uses a bridge-managed private install.
+- macOS `launchd` service support for background operation.
+
+## Quick Start
+
+### 1. Requirements
+
+You need:
+
+- Node.js >= 20
+- `codex` CLI installed and logged in
+- A Feishu / Lark PersonalAgent app; the first-run QR wizard can create or select one
+
+You do not need to preinstall `lark-cli`. `start` installs it into:
+
+```bash
+~/.feishu-codex-bridge/lark-cli
+```
+
+This avoids `/usr/local` permission issues on managed company machines. At runtime the bridge prepends this private bin directory to its own and Codex subprocess `PATH`:
+
+```bash
+~/.feishu-codex-bridge/lark-cli/node_modules/.bin
+```
+
+### 2. Install And Start
+
+With a published package:
 
 ```bash
 npm i -g feishu-codex-bridge
@@ -30,9 +69,7 @@ npm i -g feishu-codex-bridge
 pnpm add -g feishu-codex-bridge
 ```
 
-## First run
-
-After global install:
+Then start:
 
 ```bash
 feishu-codex-bridge start
@@ -44,193 +81,218 @@ For local source validation:
 cd /Users/bytedance/Documents/feishu-codex-bridge
 corepack pnpm install
 corepack pnpm start
-# or
+```
+
+Or:
+
+```bash
 node bin/feishu-codex-bridge.mjs start
 ```
 
-The first run detects there's no app configured and **opens a QR-code wizard**:
+First-run flow:
 
-1. A QR code renders in your terminal.
-2. Scan it with the Feishu / Lark app.
-3. Pick or create a PersonalAgent app.
-4. Credentials are written to `~/.feishu-codex-bridge/config.json`.
+1. Scan a QR code and create or select a PersonalAgent app.
+2. Save credentials under `~/.feishu-codex-bridge/config.json`; App Secret is moved to the encrypted local keystore.
+3. Install `lark-cli` into the bridge private directory when missing.
+4. Initialize `lark-cli` with the same App ID / App Secret, without creating a second app.
+5. Detect same-app bridge processes before connecting, so multiple WebSocket connections do not race for events.
 
-### Granting scopes and event subscriptions
+### 3. Confirm Platform Settings
 
-The wizard creates the app shell, but you still need to confirm a few things on the Lark Developer Console:
+The QR wizard creates the app shell. You still need to confirm scopes and events in the developer console.
 
-**Permission scopes:**
+Permission scopes:
+
 - `im:message`
 - `im:message:send_as_bot`
 - `im:resource`
+- `im:chat`, required for group creation
+- `drive:drive`, required for cloud-doc comments
 
-**Event subscriptions (over long-lived WebSocket):**
+Event subscriptions, long-connection mode:
+
 - `im.message.receive_v1`
 - `card.action.trigger`
-- `im.message.reaction.created_v1` / `deleted_v1` (optional)
-- `im.chat.member.bot.added_v1` (optional)
+- `drive.notice.comment_add_v1`, required for cloud-doc `@bot` comments
+- `im.message.reaction.created_v1` / `deleted_v1`, optional
+- `im.chat.member.bot.added_v1`, optional
 
-After enabling those, run `feishu-codex-bridge start` again. Once you see `✓ Connected`, find the bot in Feishu / Lark and start chatting.
+### 4. Verify
 
-## Commands
-
-### Host CLI
-
-```
-feishu-codex-bridge start [-c <config>]   Start the bot
-feishu-codex-bridge ps                    List all running start processes on this machine
-feishu-codex-bridge stop <id|#>           Stop a start process (SIGTERM, SIGKILL after 2s)
-feishu-codex-bridge service install launchd   Install a macOS background service
-feishu-codex-bridge --help                List all commands
-```
-
-> When the same app is started multiple times, Lark's open platform routes events to one of the live WebSocket connections at random. `start` detects existing processes for the same app and (in a TTY) prompts: `[c]ontinue / [k]ill old / [a]bort`. In non-TTY mode it warns and continues.
-
-`status` / `doctor` / `handover` / `workspace` are placeholders, planned for later releases.
-
-### macOS Background Service
-
-If you do not want to keep a terminal open, install a `launchd` service:
+Check local setup:
 
 ```bash
-feishu-codex-bridge service install launchd
+node bin/feishu-codex-bridge.mjs doctor
 ```
 
-For local source validation, install the service with the current source entry:
+Expected:
+
+- bridge config points to the current App ID
+- Codex CLI is available
+- `lark-cli` is installed
+- `lark-cli` App ID matches the bridge App ID
+
+Then DM the bot:
+
+```text
+/status
+hi
+```
+
+User OAuth is only needed when Codex must access personal resources such as your own chat history, docs, or calendar:
 
 ```bash
-cd /Users/bytedance/Documents/feishu-codex-bridge
+export PATH="$HOME/.feishu-codex-bridge/lark-cli/node_modules/.bin:$PATH"
+lark-cli auth login --recommend
+```
+
+Bot identity being ready does not mean user OAuth is complete. Tenant/bot APIs can work with bot identity; personal resources usually require user OAuth.
+
+## Background Service
+
+On macOS, use `launchd`:
+
+```bash
 node bin/feishu-codex-bridge.mjs service install launchd
+node bin/feishu-codex-bridge.mjs service status
+node bin/feishu-codex-bridge.mjs service logs --follow
 ```
 
-Common management commands:
+Restart or uninstall:
 
 ```bash
-feishu-codex-bridge service status
-feishu-codex-bridge service logs
-feishu-codex-bridge service logs --follow
-feishu-codex-bridge service restart
-feishu-codex-bridge service uninstall
+node bin/feishu-codex-bridge.mjs service restart
+node bin/feishu-codex-bridge.mjs service uninstall
 ```
 
-Service logs go to `~/.feishu-codex-bridge/service.log` and `~/.feishu-codex-bridge/service.err.log`. The installer writes your current shell `PATH` into the launchd plist so the background process can find `codex`.
+Run `start` once in the foreground before installing or restarting the service, so QR setup, private `lark-cli` install, and same-app binding can complete interactively.
 
-### Slash commands inside Feishu / Lark
+Service logs:
+
+- `~/.feishu-codex-bridge/service.log`
+- `~/.feishu-codex-bridge/service.err.log`
+
+## Chat Commands
 
 | Command | Effect |
 |---|---|
-| `/new`, `/reset` | Clear the current chat's session |
-| `/cd <path>` | Switch working directory (resets session) |
-| `/ws list` | List named workspaces (card + buttons) |
-| `/ws save <name>` | Save current cwd as a named workspace |
-| `/ws use <name>` | Switch to a named workspace |
-| `/ws remove <name>` | Delete a named workspace |
-| `/status` | Current cwd / session / agent (card + buttons) |
-| `/config` | Adjust preferences (reply style, tool-call display, ...) |
-| `/stop` | Stop the run in progress (also the `⏹` button on the card) |
-| `/timeout [N\|off\|default]` | Idle-watchdog (minutes) for the current session. `/config` sets the global default. See FAQ below. |
-| `/ps` | List all `start` processes on this host, marking the one replying |
-| `/exit <id\|#>` | Stop a `start` process (your own → graceful; another's → SIGTERM) |
-| `/reconnect` | Force a WebSocket reconnect (use when the bot stops responding after a network blip) |
-| `/doctor [description]` | Feed recent logs and your description back to Codex for self-diagnosis |
-| `/help` | Help card |
-| Any other `/xxx` | Forwarded verbatim to Codex |
+| `/status` | Show cwd, session, agent, and reasoning effort |
+| `/new` / `/reset` | Reset the current chat’s Codex session |
+| `/resume [N]` | List and resume recent Codex sessions under the current cwd |
+| `/cd <path>` | Change cwd for the current chat and reset the session |
+| `/ws list/save/use/remove` | Manage named workspaces |
+| `/config` | Adjust reply mode, tools, concurrency, timeout, reasoning effort, access control |
+| `/timeout [N|off|default]` | Override idle timeout for the current session |
+| `/stop` | Stop the current Codex run |
+| `/ps` | List bridge processes on this host |
+| `/exit <id|#>` | Stop a bridge process |
+| `/reconnect` | Reconnect the Feishu / Lark WebSocket |
+| `/doctor [description]` | Ask Codex to diagnose recent bridge logs |
+| `/account` | View or change the Feishu / Lark app used by the bridge |
+| `/help` | Show the help card |
 
-**Reply policy**: in a DM, the bot replies to anything. In a **group (including topic groups), the bot only replies when `@`-mentioned** (default since 0.1.22); unmentioned messages are ignored. `@all` is never answered. Cloud-doc comments must mention the bot. To restore the older "always answer in groups" behaviour: `/config` → "Require @bot in groups" → No.
+## Configuration
 
-## Data directories
+Important files:
 
-| Path | Content |
+| Path | Purpose |
 |---|---|
-| `~/.feishu-codex-bridge/config.json` | App credentials (App ID / Secret), mode 600 |
-| `~/.feishu-codex-bridge/sessions.json` | Codex session id + cwd per chat / topic (+ optional `/timeout` override) |
-| `~/.feishu-codex-bridge/workspaces.json` | Named-workspace map |
-| `~/.feishu-codex-bridge/processes.json` | Process registry for live `start` instances (used by `ps`/`stop`); dead PIDs are auto-pruned |
-| `~/.feishu-codex-bridge/media/<chatId>/` | Downloaded images / files, cleaned up after 24h |
-| `~/.feishu-codex-bridge/logs/YYYY-MM-DD.log` | Structured run logs (JSONL), rotated daily; older than 7 days are pruned at startup (`FEISHU_CODEX_LOG_DAYS` env var overrides). `/doctor` reads these. |
+| `~/.feishu-codex-bridge/config.json` | Bridge app config and preferences |
+| `~/.feishu-codex-bridge/secrets.enc` | Encrypted App Secret store |
+| `~/.feishu-codex-bridge/sessions.json` | Chat/topic to Codex session mapping |
+| `~/.feishu-codex-bridge/workspaces.json` | Named workspaces |
+| `~/.feishu-codex-bridge/processes.json` | Live bridge process registry |
+| `~/.feishu-codex-bridge/lark-cli/` | Bridge-managed private Lark CLI install |
+| `~/.feishu-codex-bridge/logs/YYYY-MM-DD.log` | Structured runtime logs |
+| `~/.feishu-codex-bridge/media/<chatId>/` | Downloaded image/file cache, cleaned after 24h |
 
-> Upgrading from before 0.1.11? Run `feishu-codex-bridge migrate` once — it moves anything under `~/.config/feishu-codex-bridge/` and `~/.cache/feishu-codex-bridge/` to the new location and upgrades `config.json` to the new schema.
+### Codex Reasoning Effort
 
-## Access control (optional)
+By default the bridge does not override Codex CLI reasoning effort. Codex inherits `model_reasoning_effort` from `~/.codex/config.toml`.
 
-Out of the box the bot is **open**: anyone who can find it can DM it, any group member can `@`-mention it to trigger a run, and commands like `/account` or `/cd` are usable by all. **That's fine for personal use** — but for a shared team setup, or anywhere you don't want strangers calling `/cd /`, you can tighten three allowlists by sending `/config` inside Feishu.
+To pin it for bridge runs only, use `/config` in Feishu / Lark or edit:
 
-### Common scenarios
+```json
+{
+  "preferences": {
+    "codexReasoningEffort": "xhigh"
+  }
+}
+```
 
-**Just me**
+Allowed values: `minimal`, `low`, `medium`, `high`, `xhigh`. Remove the field, or select default in `/config`, to inherit the global Codex config again.
 
-In the `/config` form:
-- **Allowed users**: your own `open_id`
-- Leave the other two blank
+### Access Control
 
-Messages from anyone else are silently dropped — no denial reply, since that would just confirm the bot exists to outsiders.
+The default mode is open: anyone who can find the bot can DM it, and group users can mention it. Tighten this in `/config`:
 
-**A small team**
+- `allowedUsers`: open_id allowlist for interacting with the bot.
+- `allowedChats`: group chat_id allowlist; DMs are not restricted by this field.
+- `admins`: users allowed to run sensitive commands such as `/account`, `/config`, `/exit`, `/reconnect`, `/doctor`, `/cd`, and `/ws`.
 
-- **Allowed users**: comma-separated `open_id`s of team members
-- Other two blank
-
-**Bot only responds in specific work groups**
-
-DMs are unaffected; only listed groups trigger responses:
-- **Allowed chats**: comma-separated `chat_id`s of the groups
-- DMs are **always** exempt from this list — so you can always DM the bot to change config later.
-
-**Anyone can chat with the bot, but only I can change settings**
-
-- **Admins**: your own `open_id`
-- Other two blank
-
-Others running `/account`, `/config`, `/exit`, `/reconnect`, `/doctor`, `/cd`, or `/ws` get a `❌ 此命令仅管理员可用` reply. Normal conversation (asking the bot to do things) is unaffected.
-
-**Lock everything down**
-
-Fill all three. The `/config` form catches common mistakes — e.g. if your admin list doesn't include yourself, or your chat allowlist doesn't include the chat you're submitting from, the submit is rejected with a message explaining why, so you can't accidentally lock yourself out.
-
-### Finding `open_id` and `chat_id`
-
-Easiest path: have the target user send the bot a message (or `@`-mention it in the target group), then in your terminal:
+Find IDs from logs:
 
 ```bash
 grep '"event":"enter"' ~/.feishu-codex-bridge/logs/$(date +%Y-%m-%d).log | tail -5
 ```
 
-Every line carries `chatId` (group or DM id) and `senderId` (the user's `open_id`). Copy them from there.
+## Troubleshooting
 
-The Feishu open-platform "Get user info" API also works but needs the `contact:user` scope, which is overkill if you just need a couple of IDs.
+**Bot is silent**
 
-### Worth knowing
+Check process and service state:
 
-- Changes take effect on the **next message** — no restart needed.
-- An empty field means **unrestricted**, not "nobody allowed".
-- To revert a restricted list back to fully open, clear that field in `/config` and submit.
-- DMs are deliberately exempt from the chat allowlist — meaning if you ever accidentally restrict the bot out of every group, **DM the bot and send `/config`** to recover.
-
-### Advanced: editing the config file directly
-
-The `/config` form writes to `~/.feishu-codex-bridge/config.json` under `preferences.access`:
-
-```json
-{
-  "preferences": {
-    "access": {
-      "allowedUsers": ["ou_xxxxxxxxxxxxx"],
-      "allowedChats": ["oc_xxxxxxxxxxxxx"],
-      "admins":       ["ou_xxxxxxxxxxxxx"]
-    }
-  }
-}
+```bash
+node bin/feishu-codex-bridge.mjs ps
+node bin/feishu-codex-bridge.mjs service status
 ```
 
-After a manual edit, **restart the bridge** or send **`/reconnect`** from any allowed chat to pick up the changes. The form is usually faster; direct edits make sense mostly for deployment scripts where you want to pre-seed access policy.
+Follow logs:
 
-## FAQ
+```bash
+node bin/feishu-codex-bridge.mjs service logs --follow
+```
 
-**The bot stays silent / Codex never replies.** Usually the `codex` CLI itself is not logged in, or the session points to a cwd that no longer exists. Send `/status` to inspect; `/new` to start a fresh session.
+**Codex cannot find `lark-cli`**
 
-**Codex subprocess looks frozen (card stuck on the last frame).** Since 0.1.20 there's an idle watchdog: if Codex emits nothing for N minutes the process is killed and the card is annotated `⏱ N min no response, auto-terminated`. Disabled by default. Enable with `/config` (global, in minutes), or `/timeout 10` to set it on the current session; `/timeout off` disables for the session; `/timeout default` clears the session override.
+Run:
 
-**Codex says it can't see the image I sent.** Upgrade to the latest version — releases before 0.1.0 had a filename-dedup bug.
+```bash
+node bin/feishu-codex-bridge.mjs doctor
+```
+
+For direct terminal usage:
+
+```bash
+export PATH="$HOME/.feishu-codex-bridge/lark-cli/node_modules/.bin:$PATH"
+```
+
+**`lark-cli` App ID differs from the bridge App ID**
+
+Run foreground onboarding again:
+
+```bash
+node bin/feishu-codex-bridge.mjs start
+```
+
+Accept the prompt to switch `lark-cli` back to the bridge app. Do not run `lark-cli config init --new`.
+
+**Codex run hangs**
+
+Send `/stop` in chat. For recurring hangs, set a global idle timeout in `/config`, or set one for the current session:
+
+```text
+/timeout 10
+```
+
+## Development
+
+```bash
+corepack pnpm install
+corepack pnpm run typecheck
+corepack pnpm run test
+corepack pnpm run build
+```
 
 ## License
 

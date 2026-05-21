@@ -68,6 +68,9 @@ export interface SecretsConfig {
  */
 export type MessageReplyMode = 'card' | 'markdown' | 'text';
 
+export const CODEX_REASONING_EFFORTS = ['minimal', 'low', 'medium', 'high', 'xhigh'] as const;
+export type CodexReasoningEffort = (typeof CODEX_REASONING_EFFORTS)[number];
+
 /**
  * Access control settings. All three lists default to "no restriction" when
  * empty / undefined, so existing deployments are not broken on upgrade.
@@ -120,6 +123,11 @@ export interface AppPreferences {
    * can hang indefinitely). Per-scope `/timeout` overrides this.
    */
   runIdleTimeoutMinutes?: number;
+  /**
+   * Optional per-bridge override for Codex CLI reasoning effort. When unset,
+   * codex inherits `model_reasoning_effort` from `~/.codex/config.toml`.
+   */
+  codexReasoningEffort?: CodexReasoningEffort;
   /**
    * Whether the bot only responds to messages that @-mention it in groups
    * (regular and topic groups). p2p is always unrestricted. Default true:
@@ -268,4 +276,13 @@ export function getRunIdleTimeoutMs(cfg: AppConfig): number | undefined {
   if (typeof raw !== 'number' || !Number.isFinite(raw) || raw <= 0) return undefined;
   const clamped = Math.min(Math.max(Math.floor(raw), 1), 120);
   return clamped * 60_000;
+}
+
+export function isCodexReasoningEffort(value: unknown): value is CodexReasoningEffort {
+  return typeof value === 'string' && CODEX_REASONING_EFFORTS.includes(value as CodexReasoningEffort);
+}
+
+export function getCodexReasoningEffort(cfg: AppConfig): CodexReasoningEffort | undefined {
+  const raw = cfg.preferences?.codexReasoningEffort;
+  return isCodexReasoningEffort(raw) ? raw : undefined;
 }

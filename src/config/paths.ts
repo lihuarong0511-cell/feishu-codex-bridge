@@ -2,6 +2,7 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 const appDir = join(homedir(), '.feishu-codex-bridge');
+const larkCliDir = join(appDir, 'lark-cli');
 
 export const paths = {
   appDir,
@@ -12,6 +13,9 @@ export const paths = {
   processesFile: join(appDir, 'processes.json'),
   secretsFile: join(appDir, 'secrets.enc'),
   keystoreSaltFile: join(appDir, '.keystore.salt'),
+  npmCacheDir: join(appDir, 'npm-cache'),
+  larkCliDir,
+  larkCliBinDir: join(larkCliDir, 'node_modules', '.bin'),
   /**
    * Thin shell wrapper that lark-cli (and other openclaw-exec-protocol
    * consumers) invoke to resolve secrets from the bridge's encrypted store.

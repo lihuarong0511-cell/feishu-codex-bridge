@@ -66,6 +66,7 @@ export interface StatusInfo {
   sessionId?: string;
   sessionStale: boolean;
   agentName: string;
+  reasoningEffort?: string;
   /** Session scope (= chatId or chatId:threadId in topic groups). */
   scope: string;
   /** Chat mode — used to label scope. */
@@ -87,6 +88,7 @@ export function statusCard(info: StatusInfo): object {
     `📁 **cwd**: \`${escapeCode(info.cwd)}\``,
     `🔗 **session**: ${sessionLine}`,
     `🤖 **agent**: ${escapeMd(info.agentName)}`,
+    `🧠 **reasoning**: \`${escapeCode(info.reasoningEffort ?? 'default')}\``,
   ];
   return shell('📊 当前状态', [
     divMd(lines.join('\n')),

@@ -1,4 +1,4 @@
-import type { MessageReplyMode } from '../config/schema';
+import type { CodexReasoningEffort, MessageReplyMode } from '../config/schema';
 
 export interface ConfigFormOpts {
   messageReply: MessageReplyMode;
@@ -6,6 +6,8 @@ export interface ConfigFormOpts {
   maxConcurrentRuns: number;
   /** 0 means "disabled". */
   runIdleTimeoutMinutes: number;
+  /** Undefined means "inherit Codex CLI global config". */
+  codexReasoningEffort?: CodexReasoningEffort;
   requireMentionInGroup: boolean;
   /** Comma-separated open_id allowlist; empty string = unrestricted. */
   allowedUsers: string;
@@ -96,6 +98,26 @@ export function configFormCard(opts: ConfigFormOpts): object {
               default_value: String(opts.runIdleTimeoutMinutes),
               placeholder: { tag: 'plain_text', content: '0' },
               input_type: 'text',
+            },
+            {
+              tag: 'markdown',
+              content:
+                '\n**Codex reasoning effort**\n' +
+                '_默认:继承 `~/.codex/config.toml` 的 `model_reasoning_effort`_\n' +
+                '_指定后:每次 run 都会通过 `codex exec -c model_reasoning_effort=...` 覆盖_',
+            },
+            {
+              tag: 'select_static',
+              name: 'codex_reasoning_effort',
+              initial_option: opts.codexReasoningEffort ?? 'default',
+              options: [
+                { text: { tag: 'plain_text', content: '默认(继承 Codex 配置)' }, value: 'default' },
+                { text: { tag: 'plain_text', content: 'minimal' }, value: 'minimal' },
+                { text: { tag: 'plain_text', content: 'low' }, value: 'low' },
+                { text: { tag: 'plain_text', content: 'medium' }, value: 'medium' },
+                { text: { tag: 'plain_text', content: 'high' }, value: 'high' },
+                { text: { tag: 'plain_text', content: 'xhigh' }, value: 'xhigh' },
+              ],
             },
             {
               tag: 'markdown',
@@ -227,6 +249,7 @@ export function configSavedCard(opts: ConfigFormOpts): object {
             `**工具调用显示**:\`${opts.showToolCalls ? 'show' : 'hide'}\`\n` +
             `**并发上限**:\`${opts.maxConcurrentRuns}\`\n` +
             `**run 探活**:\`${opts.runIdleTimeoutMinutes > 0 ? `${opts.runIdleTimeoutMinutes} 分钟` : '关闭'}\`\n` +
+            `**Codex reasoning effort**:\`${opts.codexReasoningEffort ?? '默认(继承)'}\`\n` +
             `**群里需要 @ bot**:\`${opts.requireMentionInGroup ? '是' : '否'}\`\n\n` +
             '🔒 **访问控制**\n' +
             `**用户白名单**:${summarizeList(opts.allowedUsers)}\n` +

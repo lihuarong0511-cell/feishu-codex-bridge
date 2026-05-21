@@ -1,6 +1,8 @@
 import { homedir } from 'node:os';
 import type { CommentEvent, LarkChannel } from '@larksuiteoapi/node-sdk';
 import type { AgentAdapter } from '../agent/types';
+import type { AppConfig } from '../config/schema';
+import { getCodexReasoningEffort } from '../config/schema';
 import { log } from '../core/logger';
 import type { SessionStore } from '../session/store';
 import type { WorkspaceStore } from '../workspace/store';
@@ -10,6 +12,7 @@ export interface CommentDeps {
   channel: LarkChannel;
   evt: CommentEvent;
   agent: AgentAdapter;
+  cfg: AppConfig;
   sessions: SessionStore;
   workspaces: WorkspaceStore;
 }
@@ -59,7 +62,7 @@ interface CommentContext {
  * a reply in the same comment thread.
  */
 export async function handleCommentMention(deps: CommentDeps): Promise<void> {
-  const { channel, evt, agent, sessions, workspaces } = deps;
+  const { channel, evt, agent, cfg, sessions, workspaces } = deps;
   // Log every comment event we receive, regardless of whether we'll act on it.
   // `mentionedBot` and `replyId` here let us tell apart top-level comments
   // from thread replies (the latter requires SDK ≥ 1.65.0-alpha.0).
@@ -124,7 +127,12 @@ export async function handleCommentMention(deps: CommentDeps): Promise<void> {
     : false;
 
   try {
-    const run = agent.run({ prompt, sessionId: resumeFrom, cwd });
+    const run = agent.run({
+      prompt,
+      sessionId: resumeFrom,
+      cwd,
+      reasoningEffort: getCodexReasoningEffort(cfg),
+    });
     let answer = '';
     let errorMsg: string | undefined;
     let terminal = false;

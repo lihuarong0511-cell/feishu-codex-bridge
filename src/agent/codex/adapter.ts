@@ -87,6 +87,8 @@ sender_name: ...
 
 ## 飞书 OAuth 授权（\`lark-cli auth login\`）
 
+bridge 启动时已经要求本机安装 \`lark-cli\`，并把它配置为与 bridge 相同的飞书/Lark 应用。**不要运行 \`lark-cli config init --new\` 新建第二个应用**；如果发现配置缺失或 App ID 不一致，请让用户重跑 \`feishu-codex-bridge start\` 完成 onboarding。
+
 授权流程要让 \`lark-cli\` 进程一直活到用户在浏览器里点完为止。bridge 在你的 run 结束之后会回收 codex，**你 spawn 的任何后台 shell 也会跟着死**——所以授权必须用"前台阻塞"的方式跑：
 
 1. **仅在 p2p 里发起授权**。从 \`bridge_context.chat_type\` 看：
@@ -135,6 +137,7 @@ export class CodexAdapter implements AgentAdapter {
       hasSession: Boolean(opts.sessionId),
       promptChars: prompt.length,
       model: opts.model,
+      reasoningEffort: opts.reasoningEffort,
       images: opts.images?.length ?? 0,
     });
 
@@ -206,13 +209,16 @@ export class CodexAdapter implements AgentAdapter {
   }
 }
 
-function buildCodexArgs(opts: AgentRunOptions, prompt: string): string[] {
+export function buildCodexArgs(opts: AgentRunOptions, prompt: string): string[] {
   const common = [
     '--json',
     '--skip-git-repo-check',
     '--dangerously-bypass-approvals-and-sandbox',
   ];
   if (opts.model) common.push('--model', opts.model);
+  if (opts.reasoningEffort) {
+    common.push('-c', `model_reasoning_effort="${opts.reasoningEffort}"`);
+  }
   for (const image of opts.images ?? []) {
     common.push('--image', image);
   }

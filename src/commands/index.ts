@@ -15,11 +15,13 @@ import { helpCard, resumeCard, statusCard, workspacesCard } from '../card/templa
 import type { AppConfig, MessageReplyMode, TenantBrand } from '../config/schema';
 import {
   getAgentStopGraceMs,
+  getCodexReasoningEffort,
   getMaxConcurrentRuns,
   getMessageReplyMode,
   getRequireMentionInGroup,
   getRunIdleTimeoutMs,
   getShowToolCalls,
+  isCodexReasoningEffort,
   isAdmin,
   secretKeyForApp,
 } from '../config/schema';
@@ -388,6 +390,7 @@ async function handleStatus(_args: string, ctx: CommandContext): Promise<void> {
     sessionId: sess?.sessionId,
     sessionStale: Boolean(sess && sess.cwd !== cwd),
     agentName: ctx.agent.displayName,
+    reasoningEffort: getCodexReasoningEffort(ctx.controls.cfg),
     scope: ctx.scope,
     chatMode: ctx.chatMode,
   });
@@ -625,6 +628,7 @@ async function handleDoctor(args: string, ctx: CommandContext): Promise<void> {
   const run = ctx.agent.run({
     prompt,
     cwd: homedir(),
+    reasoningEffort: getCodexReasoningEffort(ctx.controls.cfg),
     stopGraceMs: getAgentStopGraceMs(ctx.controls.cfg),
   });
   const handle = ctx.activeRuns.register(ctx.scope, run);
@@ -896,6 +900,7 @@ async function showConfigForm(ctx: CommandContext): Promise<void> {
     showToolCalls: getShowToolCalls(ctx.controls.cfg),
     maxConcurrentRuns: getMaxConcurrentRuns(ctx.controls.cfg),
     runIdleTimeoutMinutes: ms ? Math.round(ms / 60_000) : 0,
+    codexReasoningEffort: getCodexReasoningEffort(ctx.controls.cfg),
     requireMentionInGroup: getRequireMentionInGroup(ctx.controls.cfg),
     allowedUsers: (access.allowedUsers ?? []).join(', '),
     allowedChats: (access.allowedChats ?? []).join(', '),
@@ -958,6 +963,16 @@ async function submitConfig(ctx: CommandContext): Promise<void> {
   if (rawRequireMention === 'yes') requireMentionInGroup = true;
   else if (rawRequireMention === 'no') requireMentionInGroup = false;
   else requireMentionInGroup = getRequireMentionInGroup(ctx.controls.cfg);
+
+  // Parse codex_reasoning_effort. "default" means no bridge override, so
+  // codex inherits ~/.codex/config.toml.
+  const rawReasoningEffort = String(fv.codex_reasoning_effort ?? '').trim();
+  let codexReasoningEffort = getCodexReasoningEffort(ctx.controls.cfg);
+  if (rawReasoningEffort === 'default') {
+    codexReasoningEffort = undefined;
+  } else if (isCodexReasoningEffort(rawReasoningEffort)) {
+    codexReasoningEffort = rawReasoningEffort;
+  }
 
   // Parse access lists. Comma-separated; trim each, drop empties, dedupe.
   // Empty list = unrestricted (back-compat).
@@ -1044,6 +1059,7 @@ async function submitConfig(ctx: CommandContext): Promise<void> {
       showToolCalls,
       maxConcurrentRuns,
       runIdleTimeoutMinutes,
+      codexReasoningEffort,
       requireMentionInGroup,
       // Empty arrays serialize fine but read identically to omitted ones
       // (isUserAllowed / isAdmin both treat length===0 as unrestricted).
@@ -1065,6 +1081,7 @@ async function submitConfig(ctx: CommandContext): Promise<void> {
       showToolCalls,
       maxConcurrentRuns,
       runIdleTimeoutMinutes,
+      codexReasoningEffort: codexReasoningEffort ?? 'default',
       requireMentionInGroup,
       allowedUsersCount: allowedUsers.length,
       allowedChatsCount: allowedChats.length,
@@ -1079,6 +1096,7 @@ async function submitConfig(ctx: CommandContext): Promise<void> {
         showToolCalls,
         maxConcurrentRuns,
         runIdleTimeoutMinutes,
+        codexReasoningEffort,
         requireMentionInGroup,
         allowedUsers: allowedUsers.join(', '),
         allowedChats: allowedChats.join(', '),

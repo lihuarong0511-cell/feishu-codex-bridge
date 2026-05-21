@@ -13,6 +13,7 @@ export interface AgentRunOptions {
   cwd?: string;
   sessionId?: string;
   model?: string;
+  reasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
   images?: string[];
   permissionMode?: 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan';
   /**

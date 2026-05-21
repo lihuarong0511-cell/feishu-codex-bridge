@@ -21,6 +21,7 @@ import { tryHandleCommand, type Controls } from '../commands';
 import type { AppConfig } from '../config/schema';
 import {
   getAgentStopGraceMs,
+  getCodexReasoningEffort,
   getMaxConcurrentRuns,
   getMessageReplyMode,
   getRequireMentionInGroup,
@@ -252,9 +253,14 @@ export async function startChannel(deps: StartChannelDeps): Promise<BridgeChanne
     },
     comment: async (evt) => {
       await withTrace({ chatId: 'comment' }, async () => {
-        await handleCommentMention({ channel, evt, agent, sessions, workspaces }).catch((err) =>
-          log.fail('comment', err),
-        );
+        await handleCommentMention({
+          channel,
+          evt,
+          agent,
+          cfg: controls.cfg,
+          sessions,
+          workspaces,
+        }).catch((err) => log.fail('comment', err));
       }).catch((err) => log.fail('comment', err));
     },
     reconnecting: () => {
@@ -514,6 +520,7 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
     prompt,
     sessionId: resumeFrom,
     cwd,
+    reasoningEffort: getCodexReasoningEffort(controls.cfg),
     images: attachments.filter((a) => a.kind === 'image').map((a) => a.path),
     stopGraceMs: getAgentStopGraceMs(controls.cfg),
   });

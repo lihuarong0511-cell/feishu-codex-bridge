@@ -27,6 +27,7 @@ import {
 } from '../../runtime/registry';
 import { SessionStore } from '../../session/store';
 import { WorkspaceStore } from '../../workspace/store';
+import { ensureLarkCliOnboarded } from './lark-cli-onboarding';
 
 // Prefer IPv4 — Node 20+ defaults to "verbatim" which respects whatever
 // the resolver returns first; in IPv6-broken networks (WSL2, certain VPNs,
@@ -71,6 +72,10 @@ export async function runStart(opts: StartOptions): Promise<void> {
     cfg = await persistEncrypted(fresh, configPath);
     console.log(`配置已保存到 ${configPath}\n`);
     printScopeReminder();
+  }
+
+  if (!(await ensureLarkCliOnboarded(cfg))) {
+    process.exit(1);
   }
 
   const agent = new CodexAdapter();
@@ -367,6 +372,7 @@ async function persistEncrypted(cfg: AppConfig, configPath: string): Promise<App
 }
 
 function printScopeReminder(): void {
+  console.log('注意：bridge 和 lark-cli 必须使用同一个飞书/Lark 应用；不要为 lark-cli 另建应用。\n');
   console.log('请到开放平台为该应用确认以下能力：\n');
   console.log('  权限 scope:');
   console.log('    - im:message');

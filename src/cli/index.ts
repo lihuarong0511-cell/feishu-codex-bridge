@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import pkg from '../../package.json';
+import { runDoctor } from './commands/doctor';
 import { runMigrate } from './commands/migrate';
 import { runPs, runStopCli } from './commands/ps';
 import {
@@ -96,8 +97,9 @@ program
 program
   .command('doctor')
   .description('Check config, codex CLI, and required platform scopes')
-  .action(async () => {
-    console.log('doctor: not implemented yet');
+  .option('-c, --config <path>', 'path to config file')
+  .action(async (opts: { config?: string }) => {
+    await runDoctor(opts);
   });
 
 program

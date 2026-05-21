@@ -1,28 +1,67 @@
 # feishu-codex-bridge
 
-把飞书 / Lark 消息和本地 Codex CLI 打通的轻量 bot，用一条命令起服务，扫码绑应用，在飞书里和 Codex 对话、让它读图 / 改代码。
+在飞书 / Lark 里调用本机 Codex CLI 的个人 bot。它负责收消息、维护会话、下载附件、更新卡片；真正的代码执行、文件读写和飞书 API 操作都发生在你的电脑上。
 
 本项目参考 [zarazhangrui/feishu-claude-code-bridge](https://github.com/zarazhangrui/feishu-claude-code-bridge) 制作，感谢原项目的设计和实现启发。
 
 [English README](./README.md)
 
-## 能干什么
+## 运行模型
 
-- 在飞书（私聊直接发；群里 `@bot`）把消息转给本地的 `codex` CLI，Codex 在你指定的工作目录里工作
-- **流式卡片**：Codex 的文本和工具调用实时出现在同一张卡片上，不用傻等
-- **会话延续**：每个 chat 独立 session，对话能接着上次说
-- **排队 + 批处理**：快速连发几条会合并成一次请求；运行中发的新消息会在当前 run 结束后合并进入下一轮
-- **多工作空间**：`/ws` 切换不同项目，session 自己重置
-- **图片 / 文件**：直接发给 bot，Codex 会读本地下载的文件路径
-- **卡片按钮**：`/help` `/ws list` `/status` 返回交互卡片，点按钮直接操作
+`feishu-codex-bridge` 不是云端代理，也不是另一个模型服务。它本地启动一个长连接 bot，把飞书消息转成 `codex exec` 调用：
 
-## 前置条件
+```text
+Feishu/Lark chat
+  -> bridge WebSocket
+  -> local codex exec / resume
+  -> optional lark-cli calls
+  -> streaming card / text reply
+```
 
-- Node.js **≥ 20**
-- `codex` CLI 已安装并登录：https://developers.openai.com/codex/cli
-- 一个飞书 / Lark PersonalAgent 应用（首次启动的扫码向导能帮你创建）
+三层能力各自分工：
 
-## 安装
+- **bridge**：收发消息、会话映射、卡片流式更新、附件下载、后台常驻。
+- **Codex CLI**：理解用户意图、读写本机项目、执行命令、延续 Codex session。
+- **Lark CLI**：让 Codex 访问飞书 API，例如消息、云文档、日历、群管理和 OAuth。
+
+关键约束：**bridge 和 `lark-cli` 必须使用同一个飞书 / Lark 应用**。不要为 `lark-cli` 另建应用，否则 bot 收消息、API 权限、OAuth 用户身份会分散到不同 app，排障会非常混乱。
+
+## 能力范围
+
+- 私聊直接对话；群和话题群默认需要 `@bot` 才响应。
+- 每个 chat / 话题独立 Codex session，可 `/new` 重置、`/resume` 恢复。
+- `/cd` 和 `/ws` 管理工作目录，让 Codex 在指定项目里工作。
+- 图片和文件会下载到本机缓存后传给 Codex。
+- 流式消息卡片展示 Codex 回复和工具调用过程。
+- `/config` 可调整回复方式、工具调用显示、并发、idle timeout、群 @ 策略、访问控制、Codex reasoning effort。
+- `lark-cli` onboarding 是启动必检项，缺失时会安装到 bridge 私有目录。
+- 支持 macOS `launchd` 后台常驻。
+
+## 快速上手
+
+### 1. 准备环境
+
+需要：
+
+- Node.js >= 20
+- 已安装并登录 `codex` CLI
+- 一个飞书 / Lark PersonalAgent 应用，首次启动时可扫码创建或选择已有应用
+
+`lark-cli` 不要求你提前装。`start` 会检查并安装到：
+
+```bash
+~/.feishu-codex-bridge/lark-cli
+```
+
+这个私有安装不会写 `/usr/local`，适合公司电脑没有全局 npm 写权限的情况。bridge 启动后会把下面目录注入自己和 Codex 子进程的 `PATH`：
+
+```bash
+~/.feishu-codex-bridge/lark-cli/node_modules/.bin
+```
+
+### 2. 安装并启动
+
+使用发布包时：
 
 ```bash
 npm i -g feishu-codex-bridge
@@ -30,208 +69,231 @@ npm i -g feishu-codex-bridge
 pnpm add -g feishu-codex-bridge
 ```
 
-## 首次启动
-
-全局安装后：
+然后启动：
 
 ```bash
 feishu-codex-bridge start
 ```
 
-从源码目录本地验证时：
+源码目录验证：
 
 ```bash
 cd /Users/bytedance/Documents/feishu-codex-bridge
 corepack pnpm install
 corepack pnpm start
-# 或
+```
+
+或直接：
+
+```bash
 node bin/feishu-codex-bridge.mjs start
 ```
 
-第一次跑会检测到没配置应用，**自动进入扫码向导**：
+首次启动流程：
 
-1. 终端渲染一个二维码
-2. 用飞书 App 扫码
-3. 选择 / 创建 PersonalAgent 应用
-4. 成功后凭据写入 `~/.feishu-codex-bridge/config.json`
+1. 扫码创建或选择 PersonalAgent 应用。
+2. 凭据保存到 `~/.feishu-codex-bridge/config.json`，App Secret 迁移到本地加密 keystore。
+3. 检查 `lark-cli`，缺失时安装到 bridge 私有目录。
+4. 用同一个 App ID / App Secret 初始化 `lark-cli`，不会创建第二个应用。
+5. 检查是否已有同 app bridge 进程，避免多个长连接抢消息。
 
-### 开放平台补齐 scope 和事件订阅
+### 3. 开放平台确认
 
-向导只负责创建应用，平台侧还需要手动确认：
+扫码向导能创建应用，但开放平台里仍需要确认权限和事件。
 
-**权限 scope**：
+权限 scope：
+
 - `im:message`
 - `im:message:send_as_bot`
 - `im:resource`
+- `im:chat`，创建群需要
+- `drive:drive`，云文档评论需要
 
-**事件订阅（使用长连接接收）**：
+事件订阅，使用长连接模式：
+
 - `im.message.receive_v1`
 - `card.action.trigger`
-- `im.message.reaction.created_v1` / `deleted_v1`（可选）
-- `im.chat.member.bot.added_v1`（可选）
+- `drive.notice.comment_add_v1`，云文档 `@bot` 需要
+- `im.message.reaction.created_v1` / `deleted_v1`，可选
+- `im.chat.member.bot.added_v1`，可选
 
-启用以后再次 `feishu-codex-bridge start`，看到 `✓ 已连接` 就可以在飞书里找 bot 对话了。
+### 4. 验证
 
-## 命令速查
-
-### 宿主 CLI
-
-```
-feishu-codex-bridge start [-c <config>]   启动 bot
-feishu-codex-bridge ps                    列出本机所有正在跑的 start 进程
-feishu-codex-bridge stop <id|#>           终止指定 start 进程（SIGTERM，2s 后 SIGKILL）
-feishu-codex-bridge service install launchd   安装 macOS 后台常驻服务
-feishu-codex-bridge --help                列所有命令
-```
-
-> 多开同一个 app 时，开放平台会把事件随机推到其中一个长连接。`start` 启动前会检测同 app 已有的进程，TTY 下提示 `[c]ontinue / [k]ill old / [a]bort` 三选；非 TTY 只 warn 并继续。
-
-其它命令（`status` / `doctor` / `handover` / `workspace`）是占位，后续版本补。
-
-### macOS 后台常驻
-
-不想一直开着 terminal 时，可以安装 `launchd` 服务：
+先看本机状态：
 
 ```bash
-feishu-codex-bridge service install launchd
+node bin/feishu-codex-bridge.mjs doctor
 ```
 
-从源码目录验证时，用当前源码入口安装：
+期望看到：
+
+- bridge config 指向当前 App ID
+- Codex CLI 已安装
+- `lark-cli` 已安装
+- `lark-cli` 配置 App ID 与 bridge 一致
+
+然后在飞书私聊 bot：
+
+```text
+/status
+hi
+```
+
+需要访问你的个人聊天记录、日历、云文档等用户资源时，再做用户 OAuth：
 
 ```bash
-cd /Users/bytedance/Documents/feishu-codex-bridge
+export PATH="$HOME/.feishu-codex-bridge/lark-cli/node_modules/.bin:$PATH"
+lark-cli auth login --recommend
+```
+
+bot 身份可用不等于用户 OAuth 已完成。很多租户级 API 可以用 bot 身份；读“我的”个人资源通常需要用户 OAuth。
+
+## 后台常驻
+
+macOS 推荐用 `launchd`：
+
+```bash
 node bin/feishu-codex-bridge.mjs service install launchd
+node bin/feishu-codex-bridge.mjs service status
+node bin/feishu-codex-bridge.mjs service logs --follow
 ```
 
-常用管理命令：
+重启和卸载：
 
 ```bash
-feishu-codex-bridge service status
-feishu-codex-bridge service logs
-feishu-codex-bridge service logs --follow
-feishu-codex-bridge service restart
-feishu-codex-bridge service uninstall
+node bin/feishu-codex-bridge.mjs service restart
+node bin/feishu-codex-bridge.mjs service uninstall
 ```
 
-服务日志写到 `~/.feishu-codex-bridge/service.log` 和 `~/.feishu-codex-bridge/service.err.log`。安装时会把当前 shell 的 `PATH` 写入 launchd 配置，确保后台进程能找到 `codex`。
+安装服务前建议先前台跑一次 `start`，完成扫码、`lark-cli` 安装和同应用绑定。后台服务是非交互环境，不能回答安装确认问题。
 
-### 在飞书里用的斜杠命令
+服务日志：
+
+- `~/.feishu-codex-bridge/service.log`
+- `~/.feishu-codex-bridge/service.err.log`
+
+## 飞书命令
 
 | 命令 | 作用 |
 |---|---|
-| `/new` `/reset` | 清空当前 chat 的会话 |
-| `/cd <path>` | 切换工作目录（会重置 session） |
-| `/ws list` | 列所有命名工作空间（卡片 + 按钮） |
-| `/ws save <name>` | 把当前 cwd 存为命名工作空间 |
-| `/ws use <name>` | 切换到命名工作空间 |
-| `/ws remove <name>` | 删除命名工作空间 |
-| `/status` | 当前 cwd / session / agent（卡片 + 按钮） |
-| `/config` | 调整偏好（消息回复方式、工具调用显示等） |
-| `/stop` | 终止当前正在跑的 run（也可点卡片底部 ⏹ 终止 按钮） |
-| `/timeout [N\|off\|default]` | 当前 session 的 idle 探活（分钟）；`/config` 改全局默认。详见下方"常见问题 — Codex 子进程假死" |
-| `/ps` | 列出本机所有 start 进程，标识当前回复的是哪个 |
-| `/exit <id\|#>` | 终止指定 start 进程（自己 = graceful 退出；他人 = SIGTERM） |
-| `/reconnect` | 强制重连 WebSocket（网络抖动后 bot 没反应时用） |
-| `/doctor [描述]` | 把最近运行日志和你的描述喂给 Codex，自助诊断卡住 / 异常的原因 |
-| `/help` | 帮助卡片 |
-| 其它 `/xxx` | 原样交给 Codex |
+| `/status` | 查看当前 cwd、session、agent、reasoning effort |
+| `/new` / `/reset` | 重置当前 chat 的 Codex session |
+| `/resume [N]` | 列出并恢复当前 cwd 下的历史 Codex session |
+| `/cd <path>` | 切换当前 chat 的工作目录，并重置 session |
+| `/ws list/save/use/remove` | 管理命名工作空间 |
+| `/config` | 调整回复、工具显示、并发、timeout、reasoning effort、访问控制 |
+| `/timeout [N|off|default]` | 当前 session 的 idle timeout 覆盖 |
+| `/stop` | 停止当前正在跑的 Codex 任务 |
+| `/ps` | 列出本机 bridge 进程 |
+| `/exit <id|#>` | 关闭指定 bridge 进程 |
+| `/reconnect` | 重连飞书 WebSocket |
+| `/doctor [描述]` | 把近期 bridge 日志交给 Codex 做故障诊断 |
+| `/account` | 查看或更换 bridge 使用的飞书应用 |
+| `/help` | 查看帮助卡片 |
 
-**消息策略**：私聊 = 不需要 @，任何消息都回；**群（含话题群）= 默认要 @bot 才回**（0.1.22 起的新默认），不 @ 时 bot 完全沉默；@全员永远不响应；云文档评论必须 @bot。要恢复"群里也不强制 @"的老行为：`/config` → "群里需要 @ bot" → 选"否"。
+## 配置
 
-## 数据目录
+主要文件：
 
 | 路径 | 内容 |
 |---|---|
-| `~/.feishu-codex-bridge/config.json` | 应用凭据（App ID / Secret），权限 600 |
-| `~/.feishu-codex-bridge/sessions.json` | 每个 chat / 话题 的 Codex session id + cwd（+ 可选的 `/timeout` 覆盖） |
-| `~/.feishu-codex-bridge/workspaces.json` | 工作空间映射 |
-| `~/.feishu-codex-bridge/processes.json` | 当前在跑的 start 进程注册中心（`ps`/`stop` 用），死进程会被自动清理 |
-| `~/.feishu-codex-bridge/media/<chatId>/` | 下载的图片 / 文件，24h 自动清理 |
-| `~/.feishu-codex-bridge/logs/YYYY-MM-DD.log` | 结构化运行日志（JSON line），按天滚动；启动时清理超过 7 天的老文件（`FEISHU_CODEX_LOG_DAYS` 环境变量可改）；`/doctor` 命令读它做诊断 |
+| `~/.feishu-codex-bridge/config.json` | bridge 应用配置和偏好 |
+| `~/.feishu-codex-bridge/secrets.enc` | 加密保存的 App Secret |
+| `~/.feishu-codex-bridge/sessions.json` | chat / 话题到 Codex session 的映射 |
+| `~/.feishu-codex-bridge/workspaces.json` | 命名工作空间 |
+| `~/.feishu-codex-bridge/processes.json` | 正在运行的 bridge 进程注册表 |
+| `~/.feishu-codex-bridge/lark-cli/` | bridge 私有安装的 Lark CLI |
+| `~/.feishu-codex-bridge/logs/YYYY-MM-DD.log` | bridge 结构化运行日志 |
+| `~/.feishu-codex-bridge/media/<chatId>/` | 下载的图片和文件缓存，24h 清理 |
 
-> 升级自 0.1.11 之前的版本？跑一次 `feishu-codex-bridge migrate` —— 自动把 `~/.config/feishu-codex-bridge/` 和 `~/.cache/feishu-codex-bridge/` 下的内容搬到新位置，并把 `config.json` 升级到新结构。
+### Codex reasoning effort
 
-## 访问控制（可选）
+默认不覆盖 Codex CLI 全局配置，继承 `~/.codex/config.toml` 里的 `model_reasoning_effort`。
 
-默认 bot 是"开放"的：任何能找到它的人都能私聊它，群里 @bot 就触发响应。**个人自己用 / 给朋友用，这就够了**——但如果想给团队用、或者怕在大群里被滥用，可以在飞书里发 `/config`，调下面三栏中的一栏或几栏。
+如果只想固定 bridge 的调用强度，可以在飞书 `/config` 里设置 **Codex reasoning effort**，或直接改：
 
-### 几种典型用法
+```json
+{
+  "preferences": {
+    "codexReasoningEffort": "xhigh"
+  }
+}
+```
 
-**只让我自己用**
+支持值：`minimal`、`low`、`medium`、`high`、`xhigh`。恢复继承全局配置时，在 `/config` 里选默认，或删除该字段。
 
-`/config` 表单里：
-- "用户白名单"：填你自己的 `open_id`
-- 其它两栏留空
+### 访问控制
 
-之后非你发的消息会被 bot 静默丢弃——bot 不会回"你没权限"之类的话，免得暴露它存在。
+默认是开放模式：能找到 bot 的人可以私聊，群里 `@bot` 可以触发。需要收紧时，在 `/config` 里配置：
 
-**只让一小群同事用**
+- `allowedUsers`：允许交互的用户 `open_id` 列表。
+- `allowedChats`：允许响应的群 `chat_id` 列表，私聊不受它限制。
+- `admins`：允许执行 `/account`、`/config`、`/exit`、`/reconnect`、`/doctor`、`/cd`、`/ws` 的用户。
 
-- "用户白名单"：填同事们的 `open_id`，英文逗号分隔
-- 其它两栏留空
-
-**bot 只在指定工作群里干活**
-
-私聊不受影响；群里只有名单上的群才触发响应：
-- "群白名单"：填想让 bot 工作的群 `chat_id`，英文逗号分隔
-- 私聊**永远**不受此约束——意味着你随时能 DM bot 调配置
-
-**谁都能跟 bot 聊，但只有我能改设置**
-
-- "管理员"：填你自己的 `open_id`
-- 其它两栏留空
-
-下次别人发 `/account` `/config` `/exit` `/reconnect` `/doctor` `/cd` `/ws` 这些敏感命令，会收到 `❌ 此命令仅管理员可用`。普通对话（让 bot 帮忙做事）不受影响。
-
-**完全收紧**
-
-三栏全填。`/config` 表单会拦下常见误配——比如管理员名单里没把你自己加进去、群白名单里没包含当前会话，提交时会被拒绝并提示原因，不会让你不小心把自己锁在外面。
-
-### 怎么找 `open_id` 和 `chat_id`
-
-最快的办法：让目标用户给 bot 发一条任意消息（群的话就 @bot 一下），然后在终端：
+找 `open_id` / `chat_id`：
 
 ```bash
 grep '"event":"enter"' ~/.feishu-codex-bridge/logs/$(date +%Y-%m-%d).log | tail -5
 ```
 
-每一行都带 `chatId`（= 群或私聊 ID）和 `senderId`（= 用户 `open_id`），照着复制就行。
+## 排障
 
-也可以查飞书开放平台的"获取用户信息"API，但要先给你的应用加 `contact:user` scope，没必要为了几个 ID 折腾。
+**bot 没反应**
 
-### 几点提醒
+先查服务是否在跑：
 
-- 改完 `/config` **下一条消息**就生效，不用重启
-- 把任何一栏设成**空字符串** = 不限制（不是"一个都不允许"）
-- 想从某种受限状态回到"完全开放"，把对应栏目清空再提交即可
-- 私聊不受"群白名单"约束——这是设计上故意的：万一你不小心把所有群都锁死了，**回到 bot 的私聊里发 `/config` 就能解锁**
-
-### 高级：直接改配置文件
-
-不太想登飞书也可以，`/config` 表单背后写的是 `~/.feishu-codex-bridge/config.json` 的 `preferences.access`：
-
-```json
-{
-  "preferences": {
-    "access": {
-      "allowedUsers": ["ou_xxxxxxxxxxxxx"],
-      "allowedChats": ["oc_xxxxxxxxxxxxx"],
-      "admins":       ["ou_xxxxxxxxxxxxx"]
-    }
-  }
-}
+```bash
+node bin/feishu-codex-bridge.mjs ps
+node bin/feishu-codex-bridge.mjs service status
 ```
 
-手改完之后**重启 bridge** 或者**找一个被允许的会话发 `/reconnect`** 让新配置生效。日常调整还是用 `/config` 表单更省事，直接改文件主要用在"部署脚本里预填"之类的场景。
+再查日志：
 
-## 常见问题
+```bash
+node bin/feishu-codex-bridge.mjs service logs --follow
+```
 
-**Codex 挂住不回复**：通常是 `codex` CLI 本身没登录，或者 session 指向了不存在的 cwd。发 `/status` 看当前状态；`/new` 重开会话往往就好。
+**Codex 说找不到 `lark-cli`**
 
-**Codex 子进程假死（卡片停在最后一帧不动）**：从 0.1.20 起支持 idle 探活：codex 一段时间没输出就被 SIGTERM kill，卡片末尾会标 "⏱ N 分钟无响应，已自动终止"。默认关闭。开启方式：`/config` 设全局值（分钟），或 `/timeout 10` 只对当前 session 生效；`/timeout off` 关掉某个 session 的探活；`/timeout default` 清掉 session 覆盖回退到全局。
+先跑：
 
-**图片发过去 Codex 说看不到**：升级到最新版，0.1.0 之前的版本有文件名去重 bug。
+```bash
+node bin/feishu-codex-bridge.mjs doctor
+```
 
-## 许可
+如果普通 Terminal 里要直接用 `lark-cli`：
+
+```bash
+export PATH="$HOME/.feishu-codex-bridge/lark-cli/node_modules/.bin:$PATH"
+```
+
+**`lark-cli` App ID 和 bridge 不一致**
+
+重新前台跑：
+
+```bash
+node bin/feishu-codex-bridge.mjs start
+```
+
+按提示切换到 bridge 当前应用。不要运行 `lark-cli config init --new`。
+
+**Codex 卡住**
+
+可以在飞书发 `/stop`。长期使用建议在 `/config` 设置全局 run idle timeout，或对当前 session 使用：
+
+```text
+/timeout 10
+```
+
+## 开发
+
+```bash
+corepack pnpm install
+corepack pnpm run typecheck
+corepack pnpm run test
+corepack pnpm run build
+```
+
+## License
 
 [MIT](./LICENSE)
