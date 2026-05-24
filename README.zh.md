@@ -21,6 +21,18 @@
 ~/.feishu-codex-bridge/lark-cli
 ```
 
+如果 Codex 是 macOS app，但 `codex` 不在 `PATH`，bridge 也会检查：
+
+```bash
+/Applications/Codex.app/Contents/Resources/codex
+```
+
+也可以显式指定 Codex CLI：
+
+```bash
+export CODEX_BIN="/path/to/codex"
+```
+
 ## 安装
 
 ```bash
@@ -38,7 +50,7 @@ feishu-codex-bridge start
 
 首次运行会引导你完成：
 
-1. 检查 Codex CLI；缺失时询问是否安装 `@openai/codex` 到私有目录。
+1. 从 `CODEX_BIN`、`PATH`、bridge 私有安装目录、macOS `Codex.app` 查找 Codex CLI；缺失时询问是否安装 `@openai/codex`。
 2. 检查 Codex 登录状态；未登录时引导运行 `codex login`。
 3. 显示二维码，用飞书 / Lark 扫码。
 4. 创建或选择一个 PersonalAgent 应用。

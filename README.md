@@ -21,6 +21,18 @@ You do not need to preinstall `codex` or `lark-cli`. When missing, the bridge in
 ~/.feishu-codex-bridge/lark-cli
 ```
 
+If Codex is installed as a macOS app but `codex` is not in `PATH`, the bridge also checks:
+
+```bash
+/Applications/Codex.app/Contents/Resources/codex
+```
+
+You can pin a custom binary explicitly:
+
+```bash
+export CODEX_BIN="/path/to/codex"
+```
+
 ## Install
 
 ```bash
@@ -38,7 +50,7 @@ feishu-codex-bridge start
 
 On first run, it guides you through:
 
-1. Check Codex CLI; if missing, ask to install `@openai/codex` into the private directory.
+1. Find Codex CLI from `CODEX_BIN`, `PATH`, the bridge private install, or macOS `Codex.app`; if missing, ask to install `@openai/codex`.
 2. Check Codex login status; if needed, run `codex login`.
 3. Show a QR code for Feishu / Lark scan.
 4. Create or select a PersonalAgent app.

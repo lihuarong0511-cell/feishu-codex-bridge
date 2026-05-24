@@ -110,7 +110,7 @@ export class CodexAdapter implements AgentAdapter {
   private readonly binary: string;
 
   constructor(opts: CodexAdapterOptions = {}) {
-    this.binary = opts.binary ?? 'codex';
+    this.binary = opts.binary ?? process.env.CODEX_BIN ?? 'codex';
   }
 
   async isAvailable(): Promise<boolean> {
