@@ -88,32 +88,11 @@ secrets
   });
 
 program
-  .command('status')
-  .description('Show runtime status (WS connection, agent availability)')
-  .action(async () => {
-    console.log('status: not implemented yet');
-  });
-
-program
   .command('doctor')
   .description('Check config, codex CLI, and required platform scopes')
   .option('-c, --config <path>', 'path to config file')
   .action(async (opts: { config?: string }) => {
     await runDoctor(opts);
-  });
-
-program
-  .command('handover <text>')
-  .description('Hand over a terminal Codex CLI session to Feishu')
-  .action(async (_text: string) => {
-    console.log('handover: not implemented yet');
-  });
-
-program
-  .command('workspace <action>')
-  .description('Manage saved workspaces: list | add | remove | default')
-  .action(async (_action: string) => {
-    console.log('workspace: not implemented yet');
   });
 
 program

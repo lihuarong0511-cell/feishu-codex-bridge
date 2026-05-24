@@ -1,6 +1,6 @@
 {
   "name": "feishu-codex-bridge",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Bridge Feishu/Lark messenger with local Codex CLI",
   "type": "module",
   "bin": {
@@ -16,6 +16,7 @@
     "dist",
     "bin",
     "README.md",
+    "README.zh.md",
     "LICENSE"
   ],
   "scripts": {

@@ -1,20 +1,14 @@
 import { existsSync } from 'node:fs';
-import { copyFile, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { copyFile, readFile, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 const root = process.cwd();
 const readmePath = join(root, 'README.md');
 const backupPath = join(root, '.README.md.npm-pack-backup');
-const zhReadmePath = join(root, 'README.zh.md');
-const zhBackupPath = join(root, '.README.zh.md.npm-pack-backup');
 const modePath = join(root, '.npm-readme-mode');
 
-const npmOnlyTransforms = [
-  [/^\[中文 README\]\(\.\/README\.zh\.md\)\n{1,2}/m, ''],
-];
-
 async function transform(mode) {
-  if (existsSync(backupPath) || existsSync(zhBackupPath)) {
+  if (existsSync(backupPath)) {
     const activeMode = await readMode();
     if (activeMode === mode) return;
     await restore();
@@ -22,17 +16,8 @@ async function transform(mode) {
 
   const original = await readFile(readmePath, 'utf8');
   await writeFile(backupPath, original);
-  if (existsSync(zhReadmePath)) {
-    await rename(zhReadmePath, zhBackupPath);
-  }
 
-  let next = original;
-  for (const [pattern, replacement] of npmOnlyTransforms) {
-    next = next.replace(pattern, replacement);
-  }
-  next = next.replace(/\n{3,}/g, '\n\n');
-
-  await writeFile(readmePath, next);
+  await writeFile(readmePath, original.replace(/\n{3,}/g, '\n\n'));
   await writeFile(modePath, mode);
 }
 
@@ -52,9 +37,6 @@ async function restore() {
   if (existsSync(backupPath)) {
     await copyFile(backupPath, readmePath);
     await rm(backupPath, { force: true });
-  }
-  if (existsSync(zhBackupPath)) {
-    await rename(zhBackupPath, zhReadmePath);
   }
   await rm(modePath, { force: true });
 }

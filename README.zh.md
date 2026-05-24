@@ -1,81 +1,67 @@
 # feishu-codex-bridge
 
-在飞书 / Lark 里调用本机 Codex CLI 的个人 bot。用户在飞书里发消息，bridge 在你的电脑上调用 `codex exec`，把结果流式回到飞书。
+在飞书 / Lark 里调用本机 Codex CLI 的个人 bot。你在聊天里发消息，bridge 在你的电脑上运行 `codex exec`，再把结果流式回到飞书 / Lark。
 
 本项目参考 [zarazhangrui/feishu-claude-code-bridge](https://github.com/zarazhangrui/feishu-claude-code-bridge) 制作，感谢原项目的设计和实现启发。
 
 [English README](./README.md)
-
-## 安装
-
-```bash
-npm i -g feishu-codex-bridge
-feishu-codex-bridge start
-```
-
-## 使用
-
-首次启动会进入 onboarding：
-
-1. 检查 `codex`；没有就把官方包 `@openai/codex` 安装到 `~/.feishu-codex-bridge/codex-cli`。
-2. 检查 Codex 登录状态；没登录时引导运行 `codex login`。
-3. 终端显示二维码，用飞书 / Lark 扫码。
-4. 创建或选择一个 PersonalAgent 应用。
-5. bridge 保存应用配置，并把 App Secret 放进本地加密 keystore。
-6. 检查 `lark-cli`；没有就安装到 `~/.feishu-codex-bridge/lark-cli`。
-7. bridge 用同一个 App ID 初始化 `lark-cli`，不会为 `lark-cli` 新建第二个应用。
-
-启动成功后，在飞书私聊 bot：
-
-```text
-/status
-帮我看一下这个项目
-```
-
-`/status` 是启动后的快速自检，用来看当前 cwd、Codex session、agent 和 reasoning effort。普通文本消息会交给 Codex 处理。
-
-群聊和话题群默认需要 `@bot` 才会响应。
-
-bridge 本地启动一个长连接 bot，把每条飞书消息转成一次本机 Codex 调用：
-
-```text
-Feishu/Lark chat
-  -> bridge WebSocket
-  -> local codex exec / resume
-  -> optional lark-cli calls
-  -> streaming card / text reply
-```
-
-三层能力各自分工：
-
-- **bridge**：收发消息、会话映射、卡片流式更新、附件下载、后台常驻。
-- **Codex CLI**：理解用户意图、读写本机项目、执行命令、延续 Codex session。
-- **Lark CLI**：让 Codex 访问飞书 API，例如消息、云文档、日历、群管理和 OAuth。
 
 ## 前置条件
 
 需要：
 
 - Node.js >= 20
-- 一个飞书 / Lark PersonalAgent 应用，首次启动时可以扫码创建
+- 本机 Terminal；首次配置需要扫码、确认安装、完成 `codex login`
+- 能访问 npm registry、OpenAI / Codex、飞书 / Lark 开放平台
 
-不需要提前安装 `codex` 或 `lark-cli`。bridge 会安装到自己的私有目录，避免公司电脑没有 `/usr/local` 写权限的问题：
+不需要提前安装 `codex` 或 `lark-cli`。缺失时，bridge 会安装到自己的私有目录，避免公司电脑没有全局 npm 写权限：
 
 ```bash
 ~/.feishu-codex-bridge/codex-cli
 ~/.feishu-codex-bridge/lark-cli
 ```
 
-如果你想在普通 Terminal 里直接使用这些私有安装的 CLI，手动加 PATH：
+## 安装
 
 ```bash
-export PATH="$HOME/.feishu-codex-bridge/codex-cli/node_modules/.bin:$PATH"
-export PATH="$HOME/.feishu-codex-bridge/lark-cli/node_modules/.bin:$PATH"
+npm i -g feishu-codex-bridge
+feishu-codex-bridge --version
 ```
+
+## 首次配置
+
+在本机 Terminal 运行：
+
+```bash
+feishu-codex-bridge start
+```
+
+首次运行会引导你完成：
+
+1. 检查 Codex CLI；缺失时询问是否安装 `@openai/codex` 到私有目录。
+2. 检查 Codex 登录状态；未登录时引导运行 `codex login`。
+3. 显示二维码，用飞书 / Lark 扫码。
+4. 创建或选择一个 PersonalAgent 应用。
+5. 保存应用配置，并把 App Secret 放进本地加密 keystore。
+6. 检查 `lark-cli`；缺失时询问是否安装到私有目录。
+7. 用同一个 App ID 初始化 `lark-cli`。
+
+看到终端输出“正在监听消息”后，在飞书 / Lark 私聊 bot：
+
+```text
+/status
+帮我看一下这个项目
+```
+
+`/status` 是聊天里的快速自检，用来看当前 cwd、Codex session、agent 和 reasoning effort。普通文本消息会交给 Codex 处理。
+
+群聊和话题群默认需要 `@bot` 才会响应。
+
+后台服务请等首次配置完成后再安装，见「后台常驻」。
 
 ## 开放平台配置
 
-扫码向导能创建应用，但开放平台里仍需要确认权限和事件。
+扫码向导能创建应用，但你仍需要在开放平台确认权限和事件。缺少这些配置时，bridge 可能已经连接成功，但 bot 收不到消息或发不出回复。
 
 权限 scope：
 
@@ -93,26 +79,57 @@ export PATH="$HOME/.feishu-codex-bridge/lark-cli/node_modules/.bin:$PATH"
 - `im.message.reaction.created_v1` / `deleted_v1`，可选
 - `im.chat.member.bot.added_v1`，可选
 
-如果要让 Codex 访问你的个人聊天记录、日历、云文档等用户资源，再做用户 OAuth：
+bridge 和 `lark-cli` 必须使用同一个飞书 / Lark 应用。不要为 `lark-cli` 运行：
 
 ```bash
-export PATH="$HOME/.feishu-codex-bridge/lark-cli/node_modules/.bin:$PATH"
-lark-cli auth login --recommend
+lark-cli config init --new
 ```
 
-bot 身份可用不等于用户 OAuth 已完成。很多租户级 API 可以用 bot 身份；读“我的”个人资源通常需要用户 OAuth。
+否则 bot 收消息、API 权限、OAuth 用户身份会落到不同 app 上，后面很难排查。
 
-## 能做什么
+## 后台常驻
 
-- 私聊直接对话；群和话题群默认需要 `@bot`。
-- 每个 chat / 话题独立 Codex session，可 `/new` 重置、`/resume` 恢复。
-- `/cd` 和 `/ws` 管理工作目录，让 Codex 在指定项目里工作。
-- 图片和文件会下载到本机缓存后传给 Codex。
-- 流式消息卡片展示 Codex 回复和工具调用过程。
-- `/config` 可调整回复方式、工具调用显示、并发、idle timeout、群 @ 策略、访问控制、Codex reasoning effort。
-- 支持 macOS `launchd` 后台常驻。
+先完成一次前台配置。看到“正在监听消息”并确认飞书里能收到 `/status` 后，按 `Ctrl+C` 停掉前台进程，再安装 macOS `launchd` 服务：
 
-## 飞书命令
+```bash
+feishu-codex-bridge service install launchd
+feishu-codex-bridge service status
+feishu-codex-bridge service logs --follow
+```
+
+同一个飞书 / Lark 应用不要同时运行两个 bridge 进程；这会导致事件投递不稳定。安装 service 前先停掉前台进程。
+
+重启或卸载：
+
+```bash
+feishu-codex-bridge service restart
+feishu-codex-bridge service uninstall
+```
+
+服务日志：
+
+- `~/.feishu-codex-bridge/service.log`
+- `~/.feishu-codex-bridge/service.err.log`
+
+## 日常使用
+
+bridge 本地启动一个长连接 bot，把每条飞书 / Lark 消息转成一次本机 Codex 调用：
+
+```text
+Feishu/Lark chat
+  -> bridge WebSocket
+  -> local codex exec / resume
+  -> optional lark-cli calls
+  -> streaming card / text reply
+```
+
+三层能力各自分工：
+
+- **bridge**：收发消息、会话映射、卡片流式更新、附件下载、后台常驻。
+- **Codex CLI**：理解用户意图、读写本机项目、执行命令、延续 Codex session。
+- **Lark CLI**：让 Codex 访问飞书 API，例如消息、云文档、日历、群管理和 OAuth。
+
+常用聊天命令：
 
 | 命令 | 作用 |
 |---|---|
@@ -126,42 +143,38 @@ bot 身份可用不等于用户 OAuth 已完成。很多租户级 API 可以用 
 | <code>/stop</code> | 停止当前正在跑的 Codex 任务 |
 | <code>/ps</code> | 列出本机 bridge 进程 |
 | <code>/exit &lt;id&#124;#&gt;</code> | 关闭指定 bridge 进程 |
-| <code>/reconnect</code> | 重连飞书 WebSocket |
+| <code>/reconnect</code> | 重连飞书 / Lark WebSocket |
 | <code>/doctor [描述]</code> | 把近期 bridge 日志交给 Codex 做故障诊断 |
-| <code>/account</code> | 查看或更换 bridge 使用的飞书应用 |
+| <code>/account</code> | 查看或更换 bridge 使用的飞书 / Lark 应用 |
 | <code>/help</code> | 查看帮助卡片 |
 
-## 后台常驻
+## 用户 OAuth
 
-先前台跑一次 `start`，完成 Codex 检查、扫码、`lark-cli` 安装和同应用绑定。然后安装 macOS `launchd` 服务：
-
-```bash
-feishu-codex-bridge service install launchd
-feishu-codex-bridge service status
-feishu-codex-bridge service logs --follow
-```
-
-重启和卸载：
+基础聊天不需要用户 OAuth。只有当 Codex 需要访问“我的聊天记录、日历、云文档”等个人资源时，才需要登录 `lark-cli` 用户身份：
 
 ```bash
-feishu-codex-bridge service restart
-feishu-codex-bridge service uninstall
+export PATH="$HOME/.feishu-codex-bridge/lark-cli/node_modules/.bin:$PATH"
+lark-cli auth login --recommend
 ```
 
-服务日志：
+bot 身份可用不等于用户 OAuth 已完成。很多租户级 API 可以用 bot 身份；读个人资源通常需要用户 OAuth。
 
-- `~/.feishu-codex-bridge/service.log`
-- `~/.feishu-codex-bridge/service.err.log`
+## 源码开发
 
-## 重要约束
-
-bridge 和 `lark-cli` **必须使用同一个飞书 / Lark 应用**。不要为 `lark-cli` 运行：
+从 npm 安装的包已经包含 `dist/`，可以直接运行。clone 仓库开发时需要先安装依赖并构建：
 
 ```bash
-lark-cli config init --new
+npx pnpm@10.20.0 install
+npx pnpm@10.20.0 build
+node bin/feishu-codex-bridge.mjs --help
 ```
 
-否则 bot 收消息、API 权限、OAuth 用户身份会落到不同 app 上，后面很难查问题。正确做法是让 bridge onboarding 用当前 App ID 初始化 `lark-cli`。
+常用检查：
+
+```bash
+npx pnpm@10.20.0 typecheck
+npx pnpm@10.20.0 test
+```
 
 ## 配置文件
 
@@ -181,7 +194,7 @@ lark-cli config init --new
 
 默认不覆盖 Codex CLI 全局配置，继承 `~/.codex/config.toml` 里的 `model_reasoning_effort`。
 
-如果只想固定 bridge 的调用强度，可以在飞书 `/config` 里设置 **Codex reasoning effort**，或直接改：
+如果只想固定 bridge 的调用强度，可以在飞书 / Lark `/config` 里设置 **Codex reasoning effort**，或直接改：
 
 ```json
 {
@@ -211,38 +224,34 @@ grep '"event":"enter"' ~/.feishu-codex-bridge/logs/$(date +%Y-%m-%d).log | tail 
 
 **bot 没反应**
 
-先查服务是否在跑：
+先确认进程和服务：
 
 ```bash
 feishu-codex-bridge ps
 feishu-codex-bridge service status
 ```
 
-再查日志：
+再看日志：
 
 ```bash
 feishu-codex-bridge service logs --follow
 ```
 
-**Codex CLI 缺失或没登录**
+如果 bridge 已连接但飞书里没反应，优先检查开放平台的权限 scope 和事件订阅。
 
-先跑：
+**Codex CLI 缺失或没登录**
 
 ```bash
 feishu-codex-bridge doctor
 ```
 
-需要修复时，重新前台跑 onboarding：
+需要修复时，重新前台跑：
 
 ```bash
 feishu-codex-bridge start
 ```
 
-它会把 Codex CLI 安装到 `~/.feishu-codex-bridge/codex-cli`，并引导 `codex login`。
-
 **Codex 说找不到 `lark-cli`**
-
-先跑：
 
 ```bash
 feishu-codex-bridge doctor
@@ -266,7 +275,7 @@ feishu-codex-bridge start
 
 **Codex 卡住**
 
-可以在飞书发 `/stop`。长期使用建议在 `/config` 设置全局 run idle timeout，或对当前 session 使用：
+可以在飞书 / Lark 发 `/stop`。长期使用建议在 `/config` 设置全局 run idle timeout，或对当前 session 使用：
 
 ```text
 /timeout 10
