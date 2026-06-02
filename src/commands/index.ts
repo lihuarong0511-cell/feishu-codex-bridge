@@ -132,11 +132,9 @@ function isAdminCommand(cmd: string): boolean {
 }
 
 export async function tryHandleCommand(ctx: CommandContext): Promise<boolean> {
-  const trimmed = ctx.msg.content.trim();
-  if (!trimmed.startsWith('/')) return false;
-  const parts = trimmed.split(/\s+/);
-  const cmd = parts[0] ?? '';
-  const args = parts.slice(1).join(' ');
+  const parsed = parseCommandLine(ctx.msg.content);
+  if (!parsed) return false;
+  const { cmd, args } = parsed;
   const h = handlers[cmd];
   if (!h) return false;
   if (isAdminCommand(cmd) && !isAdmin(ctx.controls.cfg, ctx.msg.senderId)) {
@@ -153,6 +151,15 @@ export async function tryHandleCommand(ctx: CommandContext): Promise<boolean> {
     log.fail('command', err, { cmd });
   }
   return true;
+}
+
+export function parseCommandLine(content: string): { cmd: string; args: string } | undefined {
+  const trimmed = String(content || '').trim();
+  if (!trimmed.startsWith('/')) return undefined;
+  const match = /^(\S+)(?:[ \t]+([\s\S]*))?$/.exec(trimmed);
+  const cmd = match?.[1] ?? '';
+  if (!cmd) return undefined;
+  return { cmd, args: match?.[2] ?? '' };
 }
 
 /** Invoke a named command handler (e.g. from a card button click). */
