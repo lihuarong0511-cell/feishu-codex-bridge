@@ -9,6 +9,7 @@ import type { AgentAdapter } from '../agent/types';
 import { tryHandleApprovalTextMessage } from '../approval/handler';
 import { handleCardAction } from '../card/dispatcher';
 import { renderCard } from '../card/run-renderer';
+import { streamCardSafely } from '../card/safe-stream';
 import {
   finalizeIfRunning,
   initialState,
@@ -579,16 +580,15 @@ async function runAgentBatch(deps: RunBatchDeps): Promise<void> {
 
   try {
     if (replyMode === 'card') {
-      await channel.stream(
+      await streamCardSafely(
+        channel,
         chatId,
         {
-          card: {
-            initial: renderCard(initialState),
-            producer: async (ctrl) => {
-              await processAgentStream(handle, sessions, scope, cwd, idleTimeoutMs, async (state) => {
-                await ctrl.update(renderCard(filterForPrefs(state)));
-              });
-            },
+          initial: renderCard(initialState),
+          producer: async (ctrl) => {
+            await processAgentStream(handle, sessions, scope, cwd, idleTimeoutMs, async (state) => {
+              await ctrl.update(renderCard(filterForPrefs(state)));
+            });
           },
         },
         sendOpts,

@@ -12,6 +12,7 @@ import {
 import { configCancelledCard, configFormCard, configSavedCard } from '../card/config-card';
 import { forgetManagedCard, sendManagedCard, updateManagedCard } from '../card/managed';
 import { helpCard, resumeCard, statusCard, workspacesCard } from '../card/templates';
+import { streamCardSafely } from '../card/safe-stream';
 import type { AppConfig, MessageReplyMode, TenantBrand } from '../config/schema';
 import {
   getAgentStopGraceMs,
@@ -680,35 +681,34 @@ async function handleDoctor(args: string, ctx: CommandContext): Promise<void> {
   try {
     if (isP2p) {
       // Streaming card path — operator is the only viewer in p2p.
-      await ctx.channel.stream(
+      await streamCardSafely(
+        ctx.channel,
         ctx.msg.chatId,
         {
-          card: {
-            initial: renderCard(initialState),
-            producer: async (ctrl) => {
-              let state: RunState = initialState;
-              const flush = (): Promise<void> => ctrl.update(renderCard(state));
-              for await (const evt of handle.run.events) {
-                if (handle.interrupted) break;
-                // /doctor runs are session-less: skip 'system' so we don't
-                // persist a doctor's sessionId over the user's real session.
-                if (evt.type === 'system') continue;
-                if (evt.type === 'usage') {
-                  if (evt.costUsd !== undefined) {
-                    log.info('agent', 'usage', { step: 'doctor', costUsd: Number(evt.costUsd.toFixed(4)) });
-                  }
-                  continue;
+          initial: renderCard(initialState),
+          producer: async (ctrl) => {
+            let state: RunState = initialState;
+            const flush = (): Promise<void> => ctrl.update(renderCard(state));
+            for await (const evt of handle.run.events) {
+              if (handle.interrupted) break;
+              // /doctor runs are session-less: skip 'system' so we don't
+              // persist a doctor's sessionId over the user's real session.
+              if (evt.type === 'system') continue;
+              if (evt.type === 'usage') {
+                if (evt.costUsd !== undefined) {
+                  log.info('agent', 'usage', { step: 'doctor', costUsd: Number(evt.costUsd.toFixed(4)) });
                 }
-                state = reduce(state, evt);
-                await flush();
-                // Don't wait for stdout to close — some codex versions hang
-                // briefly post-result, which would leave the for-await stuck.
-                if (state.terminal !== 'running') break;
+                continue;
               }
-              state = handle.interrupted ? markInterrupted(state) : finalizeIfRunning(state);
+              state = reduce(state, evt);
               await flush();
-              await handle.run.stop();
-            },
+              // Don't wait for stdout to close — some codex versions hang
+              // briefly post-result, which would leave the for-await stuck.
+              if (state.terminal !== 'running') break;
+            }
+            state = handle.interrupted ? markInterrupted(state) : finalizeIfRunning(state);
+            await flush();
+            await handle.run.stop();
           },
         },
         { replyTo: ctx.msg.messageId },
