@@ -209,6 +209,73 @@ describe('dispatch helper', () => {
     expect(callbacks).toContainEqual({ cmd: 'agent.mark', arg: `T-001 done ${project.slug}` });
     expect(callbacks).toContainEqual({ cmd: 'agent.status', arg: project.slug });
   });
+
+  it('does not render premature result or review actions for non-reviewable board tasks', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'feishu-dispatch-board-actions-'));
+    const manager = new DispatchManager({
+      projectsDir: join(root, 'projects'),
+      codexBin: 'codex',
+      defaultCwd: root,
+    });
+    const project = await manager.createProject('board action states', '验证任务板按钮状态');
+    await manager.addTask(project.slug, '待执行任务', 'pending task');
+    await manager.addTask(project.slug, '执行中任务', 'running task');
+    await manager.markTask(project.slug, 'T-002', 'running');
+
+    const cards: Array<{ card: object; fallback: string }> = [];
+    await handleAgentCommand({
+      args: `status ${project.slug}`,
+      chatId: 'oc_supervisor',
+      cwd: root,
+      projectsDir: join(root, 'projects'),
+      reply: async () => undefined,
+      replyCard: async (card, fallback) => {
+        cards.push({ card, fallback });
+      },
+    });
+
+    expect(cards).toHaveLength(1);
+    const callbacks = callbackValues(cards[0]?.card);
+    expect(callbacks).toContainEqual({ cmd: 'agent.run', arg: `T-001 ${project.slug}` });
+    expect(callbacks).toContainEqual({ cmd: 'agent.status', arg: project.slug });
+    expect(callbacks).not.toContainEqual({ cmd: 'agent.result', arg: `T-001 ${project.slug}` });
+    expect(callbacks).not.toContainEqual({ cmd: 'agent.result', arg: `T-002 ${project.slug}` });
+    expect(callbacks).not.toContainEqual({ cmd: 'agent.run', arg: `T-002 ${project.slug}` });
+    expect(callbacks).not.toContainEqual({ cmd: 'agent.mark', arg: `T-001 accepted ${project.slug}` });
+    expect(callbacks).not.toContainEqual({ cmd: 'agent.mark', arg: `T-002 accepted ${project.slug}` });
+    expect(callbacks).not.toContainEqual({ cmd: 'agent.mark', arg: `T-001 rework ${project.slug}` });
+    expect(callbacks).not.toContainEqual({ cmd: 'agent.mark', arg: `T-002 rework ${project.slug}` });
+  });
+
+  it('rejects stale single-task run clicks before sending a launch acknowledgement', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'feishu-dispatch-run-preflight-'));
+    const manager = new DispatchManager({
+      projectsDir: join(root, 'projects'),
+      codexBin: 'codex',
+      defaultCwd: root,
+    });
+    const project = await manager.createProject('run preflight', '验证旧卡防误触');
+    await manager.addTask(project.slug, '已待复核任务', 'reviewing task');
+    await writeFile(join(project.path, 'outputs', 'T-001-result.md'), 'review body\n', 'utf8');
+    await manager.markTask(project.slug, 'T-001', 'reviewing');
+
+    const replies: string[] = [];
+    await handleAgentCommand({
+      args: `run T-001 ${project.slug}`,
+      chatId: 'oc_worker',
+      codexBin: await fakeCodex(join(root, 'fake-codex'), 'should not run'),
+      cwd: root,
+      projectsDir: join(root, 'projects'),
+      reply: async (text) => {
+        replies.push(text);
+      },
+    });
+
+    expect(replies).toHaveLength(1);
+    expect(replies[0]).toBe('调度命令失败：T-001 当前状态是 reviewing，不能直接执行。');
+    expect(replies[0]).not.toMatch(/已启动/);
+    await expect(readFile(join(project.path, 'outputs', 'T-001-result.md'), 'utf8')).resolves.toBe('review body\n');
+  });
 });
 
 function callbackValues(card: unknown): Array<Record<string, unknown>> {

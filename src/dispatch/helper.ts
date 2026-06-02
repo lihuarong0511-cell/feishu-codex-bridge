@@ -15,6 +15,10 @@ const TASK_STATUSES = new Set([
   'failed',
 ]);
 
+const RUNNABLE_STATUSES = new Set(['pending', 'assigned', 'rework', 'blocked', 'failed']);
+const RESULT_STATUSES = new Set(['reviewing', 'accepted', 'done']);
+const REVIEWABLE_STATUSES = new Set(['reviewing']);
+
 const DEFAULT_PROJECTS_DIR = join(homedir(), '.openclaw', 'workspace', 'projects');
 
 const PINYIN: Record<string, string> = {
@@ -270,15 +274,21 @@ export class DispatchManager {
     const projectPath = await this.projectPath(projectSlug);
     const board = await readBoard(projectPath);
     return board.tasks
-      .filter((task) => ['pending', 'assigned', 'rework', 'blocked', 'failed'].includes(task.status))
+      .filter((task) => isRunnableTask(task))
       .map((task) => task.id);
+  }
+
+  async getTask(projectSlug: string, taskId: string): Promise<DispatchTask> {
+    const projectPath = await this.projectPath(projectSlug);
+    const board = await readBoard(projectPath);
+    return { ...findTask(board, taskId) };
   }
 
   async runTask(projectSlug: string, taskId: string, chatId = ''): Promise<DispatchTask> {
     const projectPath = await this.projectPath(projectSlug);
     let board = await readBoard(projectPath);
     const task = findTask(board, taskId);
-    if (!['pending', 'assigned', 'rework', 'blocked', 'failed'].includes(task.status)) {
+    if (!isRunnableTask(task)) {
       throw new DispatchError(`${task.id} 当前状态是 ${task.status}，不能直接执行。`);
     }
     task.status = 'running';
@@ -377,7 +387,7 @@ export class DispatchManager {
     }
     const board = await readBoard(projectPath);
     const task = findTask(board, taskId);
-    if (!['pending', 'assigned', 'rework', 'blocked', 'failed'].includes(task.status)) {
+    if (!isRunnableTask(task)) {
       throw new DispatchError(`${task.id} 当前状态是 ${task.status}，不能分派。`);
     }
     task.status = 'assigned';
@@ -559,6 +569,10 @@ export async function handleAgentCommand(opts: HandleAgentCommandOptions): Promi
           void runAndNotify(manager, projectSlug, taskId, chatId, reply, replyCard, sendToChat, sendCardToChat);
         }
         return;
+      }
+      const task = await manager.getTask(projectSlug, target);
+      if (!isRunnableTask(task)) {
+        throw new DispatchError(`${task.id} 当前状态是 ${task.status}，不能直接执行。`);
       }
       await reply(`已启动执行对话：${target}\n完成后会回写 outputs/${target}-result.md 并通知主控复核。`);
       void runAndNotify(manager, projectSlug, target, chatId, reply, replyCard, sendToChat, sendCardToChat);
@@ -765,6 +779,18 @@ function findTask(board: DispatchBoard, taskId: string): DispatchTask {
   return task;
 }
 
+function isRunnableTask(task: DispatchTask): boolean {
+  return RUNNABLE_STATUSES.has(task.status);
+}
+
+function hasReadableResult(task: DispatchTask): boolean {
+  return RESULT_STATUSES.has(task.status);
+}
+
+function isReviewableTask(task: DispatchTask): boolean {
+  return REVIEWABLE_STATUSES.has(task.status);
+}
+
 function nextTaskId(board: DispatchBoard): string {
   let max = 0;
   for (const task of board.tasks) {
@@ -908,13 +934,23 @@ function agentBoardCard(projectPath: string, board: DispatchBoard): object {
   } else {
     for (const task of rows) {
       elements.push(divMd(`**${task.id}** [${escapeMd(task.status)}] ${escapeMd(task.title)}\n输出：\`${escapeCode(task.output)}\``));
-      elements.push(
-        actions([
-          { text: '查看结果', value: { cmd: 'agent.result', arg: `${task.id} ${board.project.slug}` } },
+      const buttons: Array<{ text: string; value: Record<string, unknown>; style?: 'primary' | 'danger' | 'default' }> = [
+        { text: '任务板', value: { cmd: 'agent.status', arg: board.project.slug } },
+      ];
+      if (isRunnableTask(task)) {
+        buttons.unshift({ text: '开始执行', value: { cmd: 'agent.run', arg: `${task.id} ${board.project.slug}` }, style: 'primary' });
+      }
+      if (hasReadableResult(task)) {
+        buttons.unshift({ text: '查看结果', value: { cmd: 'agent.result', arg: `${task.id} ${board.project.slug}` } });
+      }
+      if (isReviewableTask(task)) {
+        buttons.push(
           { text: '通过', value: { cmd: 'agent.mark', arg: `${task.id} accepted ${board.project.slug}` }, style: 'primary' },
           { text: '返工', value: { cmd: 'agent.mark', arg: `${task.id} rework ${board.project.slug}` }, style: 'danger' },
-        ]),
-      );
+          { text: '归档完成', value: { cmd: 'agent.mark', arg: `${task.id} done ${board.project.slug}` } },
+        );
+      }
+      elements.push(actions(buttons));
     }
   }
   return shell('多对话调度任务板', elements);
@@ -938,7 +974,6 @@ function agentAssignResultCard(projectSlug: string, task: DispatchTask, worker: 
     divMd(`任务：**${task.id} ${escapeMd(task.title)}**\n项目：\`${escapeCode(projectSlug)}\`\n执行对话：\`${escapeCode(worker.name)}\`\n目标 chat：\`${escapeCode(worker.chatId)}\``),
     actions([
       { text: '查看任务板', value: { cmd: 'agent.status', arg: projectSlug }, style: 'primary' },
-      { text: '查看结果', value: { cmd: 'agent.result', arg: `${task.id} ${projectSlug}` } },
     ]),
   ]);
 }
