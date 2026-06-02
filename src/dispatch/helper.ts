@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -20,6 +21,7 @@ const RESULT_STATUSES = new Set(['reviewing', 'accepted', 'done']);
 const REVIEWABLE_STATUSES = new Set(['reviewing']);
 
 const DEFAULT_PROJECTS_DIR = join(homedir(), '.openclaw', 'workspace', 'projects');
+const boardLocks = new Map<string, Promise<void>>();
 
 const PINYIN: Record<string, string> = {
   博: 'bo',
@@ -242,29 +244,30 @@ export class DispatchManager {
 
   async addTask(projectSlug: string, title: string, instructions: string): Promise<DispatchTask> {
     const projectPath = await this.projectPath(projectSlug);
-    const board = await readBoard(projectPath);
     const cleanTitle = String(title || '').trim();
     const cleanInstructions = String(instructions || '').trim();
     if (!cleanTitle) throw new DispatchError('任务标题不能为空。');
     if (!cleanInstructions) throw new DispatchError('任务说明不能为空。');
-    const id = nextTaskId(board);
-    const now = nowText();
-    const task: DispatchTask = {
-      id,
-      title: cleanTitle,
-      status: 'pending',
-      instructions: cleanInstructions,
-      sessionId: '',
-      createdAt: now,
-      updatedAt: now,
-      output: `outputs/${id}-result.md`,
-    };
-    board.tasks.push(task);
-    board.project.updatedAt = now;
-    await writeBoard(projectPath, board);
+    const { board, task } = await updateBoard(projectPath, (board) => {
+      const id = nextTaskId(board);
+      const now = nowText();
+      const task: DispatchTask = {
+        id,
+        title: cleanTitle,
+        status: 'pending',
+        instructions: cleanInstructions,
+        sessionId: '',
+        createdAt: now,
+        updatedAt: now,
+        output: `outputs/${id}-result.md`,
+      };
+      board.tasks.push(task);
+      board.project.updatedAt = now;
+      return { board, task };
+    });
     await writeFile(
-      join(projectPath, 'tasks', `${id}.md`),
-      `# ${id} ${cleanTitle}\n\n项目：${board.project.name}\n状态：pending\n输出文件：outputs/${id}-result.md\n\n## 任务说明\n\n${cleanInstructions}\n`,
+      join(projectPath, 'tasks', `${task.id}.md`),
+      `# ${task.id} ${cleanTitle}\n\n项目：${board.project.name}\n状态：pending\n输出文件：outputs/${task.id}-result.md\n\n## 任务说明\n\n${cleanInstructions}\n`,
       'utf8',
     );
     return task;
@@ -286,15 +289,16 @@ export class DispatchManager {
 
   async runTask(projectSlug: string, taskId: string, chatId = ''): Promise<DispatchTask> {
     const projectPath = await this.projectPath(projectSlug);
-    let board = await readBoard(projectPath);
-    const task = findTask(board, taskId);
-    if (!isRunnableTask(task)) {
-      throw new DispatchError(`${task.id} 当前状态是 ${task.status}，不能直接执行。`);
-    }
-    task.status = 'running';
-    task.updatedAt = nowText();
-    board.project.updatedAt = task.updatedAt;
-    await writeBoard(projectPath, board);
+    const { board, task } = await updateBoard(projectPath, (board) => {
+      const task = findTask(board, taskId);
+      if (!isRunnableTask(task)) {
+        throw new DispatchError(`${task.id} 当前状态是 ${task.status}，不能直接执行。`);
+      }
+      task.status = 'running';
+      task.updatedAt = nowText();
+      board.project.updatedAt = task.updatedAt;
+      return { board, task: { ...task } };
+    });
     await appendProgress(projectPath, task.id, 'running', '开始执行。');
 
     const lastMessage = join(projectPath, 'progress', `${task.id}-last-message.md`);
@@ -346,13 +350,14 @@ export class DispatchManager {
       );
     }
 
-    board = await readBoard(projectPath);
-    const updated = findTask(board, task.id);
-    updated.status = 'reviewing';
-    updated.sessionId = sessionId;
-    updated.updatedAt = nowText();
-    board.project.updatedAt = updated.updatedAt;
-    await writeBoard(projectPath, board);
+    const updated = await updateBoard(projectPath, (board) => {
+      const updated = findTask(board, task.id);
+      updated.status = 'reviewing';
+      updated.sessionId = sessionId;
+      updated.updatedAt = nowText();
+      board.project.updatedAt = updated.updatedAt;
+      return { ...updated };
+    });
     await appendProgress(projectPath, task.id, 'reviewing', `执行完成，结果写入 outputs/${task.id}-result.md`);
     return updated;
   }
@@ -385,18 +390,19 @@ export class DispatchManager {
         `没有找到执行对话：${cleanWorkerName}。先在目标对话发 /agent worker ${cleanWorkerName} ${projectSlug}`,
       );
     }
-    const board = await readBoard(projectPath);
-    const task = findTask(board, taskId);
-    if (!isRunnableTask(task)) {
-      throw new DispatchError(`${task.id} 当前状态是 ${task.status}，不能分派。`);
-    }
-    task.status = 'assigned';
-    task.assignedTo = worker.name;
-    task.workerChatId = worker.chatId;
-    task.supervisorChatId = String(supervisorChatId || '').trim();
-    task.updatedAt = nowText();
-    board.project.updatedAt = task.updatedAt;
-    await writeBoard(projectPath, board);
+    const { board, task } = await updateBoard(projectPath, (board) => {
+      const task = findTask(board, taskId);
+      if (!isRunnableTask(task)) {
+        throw new DispatchError(`${task.id} 当前状态是 ${task.status}，不能分派。`);
+      }
+      task.status = 'assigned';
+      task.assignedTo = worker.name;
+      task.workerChatId = worker.chatId;
+      task.supervisorChatId = String(supervisorChatId || '').trim();
+      task.updatedAt = nowText();
+      board.project.updatedAt = task.updatedAt;
+      return { board, task };
+    });
     await appendProgress(projectPath, task.id, 'assigned', `分派给 ${worker.name} (${worker.chatId})`);
     return { projectPath, board, task, worker };
   }
@@ -407,12 +413,13 @@ export class DispatchManager {
       throw new DispatchError(`状态必须是：${[...TASK_STATUSES].sort().join(', ')}`);
     }
     const projectPath = await this.projectPath(projectSlug);
-    const board = await readBoard(projectPath);
-    const task = findTask(board, taskId);
-    task.status = normalized;
-    task.updatedAt = nowText();
-    board.project.updatedAt = task.updatedAt;
-    await writeBoard(projectPath, board);
+    const task = await updateBoard(projectPath, (board) => {
+      const task = findTask(board, taskId);
+      task.status = normalized;
+      task.updatedAt = nowText();
+      board.project.updatedAt = task.updatedAt;
+      return { ...task };
+    });
     await appendProgress(projectPath, task.id, normalized, '主控手动更新状态。');
     return task;
   }
@@ -753,9 +760,34 @@ async function readBoard(projectPath: string): Promise<DispatchBoard> {
 
 async function writeBoard(projectPath: string, board: DispatchBoard): Promise<void> {
   await mkdir(dirname(join(projectPath, 'task_board.json')), { recursive: true });
-  const tmp = join(projectPath, `task_board.json.tmp-${process.pid}`);
+  const tmp = join(projectPath, `task_board.json.tmp-${process.pid}-${randomUUID()}`);
   await writeFile(tmp, `${JSON.stringify(board, null, 2)}\n`, 'utf8');
   await rename(tmp, join(projectPath, 'task_board.json'));
+}
+
+async function updateBoard<T>(
+  projectPath: string,
+  update: (board: DispatchBoard) => T | Promise<T>,
+): Promise<T> {
+  const previous = boardLocks.get(projectPath) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolveLock) => {
+    release = resolveLock;
+  });
+  const queued = previous.then(() => current, () => current);
+  boardLocks.set(projectPath, queued);
+  await previous;
+  try {
+    const board = await readBoard(projectPath);
+    const result = await update(board);
+    await writeBoard(projectPath, board);
+    return result;
+  } finally {
+    release();
+    if (boardLocks.get(projectPath) === queued) {
+      boardLocks.delete(projectPath);
+    }
+  }
 }
 
 async function readWorkers(projectPath: string): Promise<Workers> {
@@ -801,14 +833,15 @@ function nextTaskId(board: DispatchBoard): string {
 }
 
 async function markFailed(projectPath: string, taskId: string, error: string): Promise<void> {
-  const board = await readBoard(projectPath);
-  const task = findTask(board, taskId);
-  task.status = 'failed';
-  task.error = String(error || '').slice(-1200);
-  task.updatedAt = nowText();
-  board.project.updatedAt = task.updatedAt;
-  await writeBoard(projectPath, board);
-  await appendProgress(projectPath, task.id, 'failed', task.error);
+  const task = await updateBoard(projectPath, (board) => {
+    const task = findTask(board, taskId);
+    task.status = 'failed';
+    task.error = String(error || '').slice(-1200);
+    task.updatedAt = nowText();
+    board.project.updatedAt = task.updatedAt;
+    return { ...task };
+  });
+  await appendProgress(projectPath, task.id, 'failed', task.error ?? '');
 }
 
 async function appendProgress(projectPath: string, taskId: string, statusText: string, note: string): Promise<void> {

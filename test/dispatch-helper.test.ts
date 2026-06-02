@@ -118,6 +118,132 @@ describe('dispatch helper', () => {
     expect(replies[0]).toMatch(/worker file result/);
   });
 
+  it('preserves task board updates when multiple workers finish concurrently', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'feishu-dispatch-concurrent-'));
+    const manager = new DispatchManager({
+      projectsDir: join(root, 'projects'),
+      codexBin: 'codex',
+      defaultCwd: root,
+      timeoutMs: 30_000,
+    });
+    const project = await manager.createProject('concurrent workers', '验证并发任务板回写');
+    await manager.addTask(project.slug, '并发任务 A', 'write result A');
+    await manager.addTask(project.slug, '并发任务 B', 'write result B');
+
+    const fakeConcurrentCodex = join(root, 'fake-concurrent-codex');
+    await writeFile(
+      fakeConcurrentCodex,
+      [
+        '#!/bin/sh',
+        'sleep 0.1',
+        'prompt="${@: -1}"',
+        'case "$prompt" in',
+        "  *T-001*) tid='T-001'; sid='11111111-1111-1111-1111-111111111111' ;;",
+        "  *T-002*) tid='T-002'; sid='22222222-2222-2222-2222-222222222222' ;;",
+        "  *) tid='unknown'; sid='00000000-0000-0000-0000-000000000000' ;;",
+        'esac',
+        'while [ "$1" != "" ]; do',
+        '  if [ "$1" = "--output-last-message" ]; then',
+        '    shift',
+        '    printf "worker result %s\\n" "$tid" > "$1"',
+        '  fi',
+        '  shift || exit 0',
+        'done',
+        'printf \'{"thread_id":"%s"}\\n\' "$sid"',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    await chmod(fakeConcurrentCodex, 0o755);
+
+    const runner = new DispatchManager({
+      projectsDir: join(root, 'projects'),
+      codexBin: fakeConcurrentCodex,
+      defaultCwd: root,
+      timeoutMs: 30_000,
+    });
+    await Promise.all([
+      runner.runTask(project.slug, 'T-001', 'oc_worker_a'),
+      runner.runTask(project.slug, 'T-002', 'oc_worker_b'),
+    ]);
+
+    const board = JSON.parse(await readFile(join(project.path, 'task_board.json'), 'utf8'));
+    expect(board.tasks).toMatchObject([
+      {
+        id: 'T-001',
+        status: 'reviewing',
+        sessionId: '11111111-1111-1111-1111-111111111111',
+      },
+      {
+        id: 'T-002',
+        status: 'reviewing',
+        sessionId: '22222222-2222-2222-2222-222222222222',
+      },
+    ]);
+  });
+
+  it('preserves failed task states when multiple workers fail concurrently', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'feishu-dispatch-concurrent-fail-'));
+    const manager = new DispatchManager({
+      projectsDir: join(root, 'projects'),
+      codexBin: 'codex',
+      defaultCwd: root,
+      timeoutMs: 30_000,
+    });
+    const project = await manager.createProject('concurrent failed workers', '验证并发失败回写');
+    await manager.addTask(project.slug, '失败任务 A', 'fail A');
+    await manager.addTask(project.slug, '失败任务 B', 'fail B');
+
+    const fakeFailingCodex = join(root, 'fake-failing-codex');
+    await writeFile(
+      fakeFailingCodex,
+      [
+        '#!/bin/sh',
+        'sleep 0.1',
+        'prompt="${@: -1}"',
+        'case "$prompt" in',
+        "  *T-001*) tid='T-001' ;;",
+        "  *T-002*) tid='T-002' ;;",
+        "  *) tid='unknown' ;;",
+        'esac',
+        'printf "worker failed %s\\n" "$tid" >&2',
+        'exit 42',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    await chmod(fakeFailingCodex, 0o755);
+
+    const runner = new DispatchManager({
+      projectsDir: join(root, 'projects'),
+      codexBin: fakeFailingCodex,
+      defaultCwd: root,
+      timeoutMs: 30_000,
+    });
+    const results = await Promise.allSettled([
+      runner.runTask(project.slug, 'T-001', 'oc_worker_a'),
+      runner.runTask(project.slug, 'T-002', 'oc_worker_b'),
+    ]);
+
+    expect(results).toMatchObject([
+      { status: 'rejected' },
+      { status: 'rejected' },
+    ]);
+    const board = JSON.parse(await readFile(join(project.path, 'task_board.json'), 'utf8'));
+    expect(board.tasks).toMatchObject([
+      {
+        id: 'T-001',
+        status: 'failed',
+        error: expect.stringContaining('worker failed T-001'),
+      },
+      {
+        id: 'T-002',
+        status: 'failed',
+        error: expect.stringContaining('worker failed T-002'),
+      },
+    ]);
+  });
+
   it('assigns a task to a registered worker chat and sends an interactive assignment card', async () => {
     const root = await mkdtemp(join(tmpdir(), 'feishu-dispatch-cross-chat-'));
     const manager = new DispatchManager({
