@@ -107,7 +107,7 @@ export class CodexAdapter implements AgentAdapter {
   readonly id = 'codex';
   readonly displayName = 'Codex';
 
-  private readonly binary: string;
+  readonly binary: string;
 
   constructor(opts: CodexAdapterOptions = {}) {
     this.binary = opts.binary ?? process.env.CODEX_BIN ?? 'codex';

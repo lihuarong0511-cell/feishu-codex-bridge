@@ -6,6 +6,7 @@ import type {
 } from '@larksuiteoapi/node-sdk';
 import { Domain, LoggerLevel, createLarkChannel } from '@larksuiteoapi/node-sdk';
 import type { AgentAdapter } from '../agent/types';
+import { tryHandleApprovalTextMessage } from '../approval/handler';
 import { handleCardAction } from '../card/dispatcher';
 import { renderCard } from '../card/run-renderer';
 import {
@@ -38,6 +39,7 @@ import type { WorkspaceStore } from '../workspace/store';
 import { ActiveRuns, type RunHandle } from './active-runs';
 import { ChatModeCache, type ChatMode } from './chat-mode-cache';
 import { handleCommentMention } from './comments';
+import { isCommandTextAllowedBeforeMention } from './group-command-gate';
 import { expandInteractiveCard } from './interactive-card';
 import { startKeepalive } from './keepalive';
 import { configureNetwork } from './network-config';
@@ -398,17 +400,27 @@ async function intakeMessage(deps: IntakeDeps): Promise<void> {
   }
 
   // Group-mention policy. p2p is always unrestricted; in groups (regular and
-  // topic) we drop messages that don't @bot when the user has opted into the
-  // quiet-by-default behavior. Slash commands are NOT exempt — the user
-  // chose strict mode so the group stays uniformly quiet unless mentioned.
+  // topic) normal chat still requires @bot in quiet mode. A small set of
+  // slash commands is exempt so operational flows like /agent worker and
+  // /agent run work in freshly-created execution chats without needing a
+  // mention prefix every time.
   // @全员 is already filtered by SDK (`respondToMentionAll: false`), so any
   // event reaching here is either targeted or undirected chatter.
+  const commandAllowedBeforeMention =
+    msg.chatType !== 'p2p' && isCommandTextAllowedBeforeMention(msg.content);
   if (
     msg.chatType !== 'p2p' &&
     getRequireMentionInGroup(controls.cfg) &&
-    !msg.mentionedBot
+    !msg.mentionedBot &&
+    !commandAllowedBeforeMention
   ) {
     log.info('intake', 'skip-no-mention', { scope, chatType: msg.chatType });
+    return;
+  }
+
+  if (await tryHandleApprovalTextMessage(channel, msg)) {
+    const dropped = pending.cancel(scope);
+    log.info('intake', 'approval-text', { scope, droppedPending: dropped.length });
     return;
   }
 

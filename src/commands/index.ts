@@ -42,6 +42,7 @@ import type { SessionStore } from '../session/store';
 import { validateAppCredentials } from '../utils/feishu-auth';
 import type { WorkspaceStore } from '../workspace/store';
 import { createBoundChat, defaultChatName } from '../bot/group';
+import { handleAgentCommand } from '../dispatch/helper';
 
 export interface Controls {
   /** Restart the bridge in-process: disconnect WS, kill codex runs, reload
@@ -100,6 +101,8 @@ const handlers: Record<string, Handler> = {
   '/config': handleConfig,
   '/stop': handleStop,
   '/timeout': handleTimeout,
+  '/agent': handleAgent,
+  '/dispatch': handleAgent,
   '/ps': handlePs,
   '/exit': handleExit,
   '/doctor': handleDoctor,
@@ -118,6 +121,8 @@ const ADMIN_COMMANDS = new Set([
   '/exit',
   '/reconnect',
   '/doctor',
+  '/agent',
+  '/dispatch',
   '/cd',
   '/ws',
 ]);
@@ -453,6 +458,38 @@ async function handleTimeout(args: string, ctx: CommandContext): Promise<void> {
   ctx.sessions.setIdleTimeoutMinutes(ctx.scope, n);
   log.info('command', 'timeout-set', { scope: ctx.scope, minutes: n });
   await reply(ctx, `✅ 当前 session 探活已设为 ${n} 分钟。`);
+}
+
+async function handleAgent(args: string, ctx: CommandContext): Promise<void> {
+  const cwd = ctx.workspaces.cwdFor(ctx.scope) ?? homedir();
+  await handleAgentCommand({
+    args,
+    chatId: ctx.msg.chatId,
+    codexBin: ctx.agent.binary ?? process.env.CODEX_BIN ?? 'codex',
+    cwd,
+    reply: async (markdown) => {
+      await reply(ctx, markdown);
+    },
+    replyCard: async (card, fallback) => {
+      try {
+        await ctx.channel.send(ctx.msg.chatId, { card }, { replyTo: ctx.msg.messageId });
+      } catch (err) {
+        log.fail('command', err, { step: 'agent.replyCard' });
+        await reply(ctx, fallback);
+      }
+    },
+    sendToChat: async (chatId, markdown) => {
+      await ctx.channel.send(chatId, { markdown });
+    },
+    sendCardToChat: async (chatId, card, fallback) => {
+      try {
+        await ctx.channel.send(chatId, { card });
+      } catch (err) {
+        log.fail('command', err, { step: 'agent.sendCardToChat' });
+        await ctx.channel.send(chatId, { markdown: fallback });
+      }
+    },
+  });
 }
 
 async function handlePs(_args: string, ctx: CommandContext): Promise<void> {
