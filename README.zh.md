@@ -184,16 +184,29 @@ Feishu/Lark chat
 /agent review T-001 项目slug
 ```
 
+创建项目时建议按华荣项目字段填写目标正文：
+
+```text
+/agent new 【企业策划】项目名
+核心目标：这个项目要解决什么问题
+交付物：最终需要产出什么
+关键节点：截止日期或重要时间点
+参考方向：参考资料、风格偏好、特殊要求
+```
+
 项目目录默认在 `~/.openclaw/workspace/projects/<project-slug>/`，核心文件：
 
+- `project.md`：项目立项底稿，包含业务线、核心目标、交付物、关键节点、参考方向和对应业务线交付模板。
 - `07_上下文窗口治理机制.md`：长期规则，定义主控对话、执行对话、写入边界和越权检查。
 - `09_dispatch_board.md`：主控可读看板，由 `task_board.json` 自动同步生成，执行对话不得直接修改。
 - `templates/worker_startup_instruction.md`：执行对话启动指令模板。
 - `worker_state/T-xxx.json`：执行对话自己的状态文件。
 - `outputs/T-xxx-result.md`：执行对话结果文件。
-- `reviews/T-xxx-review.md`：主控验收记录。
+- `reviews/T-xxx-review.md`：主控验收记录，包含结果章节、自动复核维度和越权风险检查。
 
 执行对话只允许写自己的 `outputs/<task-id>-result.md` 和 `worker_state/<task-id>.json`。如果它修改 `project.md`、`task_board.json`、`09_dispatch_board.md`、治理机制文件或其它任务文件，`/agent review` 会把任务打回 `rework`。
+
+`/agent review` 不只检查文件是否存在，还要求结果包含：核心结论、执行过程摘要、产出或发现、风险/阻塞、下一步建议、自动复核。自动复核必须覆盖：事实准确性、逻辑完整性、执行可行性、表达质量、遗漏风险、方案影响。结果卡的主按钮是“自动验收”，用于避免直接人工通过绕过复核。
 
 ## 用户 OAuth
 

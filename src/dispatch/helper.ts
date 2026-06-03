@@ -22,6 +22,103 @@ const REVIEWABLE_STATUSES = new Set(['reviewing']);
 
 const DEFAULT_PROJECTS_DIR = join(homedir(), '.openclaw', 'workspace', 'projects');
 const boardLocks = new Map<string, Promise<void>>();
+const BUSINESS_LINES = ['博物馆', '咖啡清吧', '餐饮', '房地产', '占星', '企业策划'] as const;
+const QUALITY_REVIEW_DIMENSIONS = ['事实准确性', '逻辑完整性', '执行可行性', '表达质量', '遗漏风险', '方案影响'];
+const RESULT_REQUIRED_SECTIONS = ['核心结论', '执行过程摘要', '产出或发现', '风险/阻塞', '下一步建议', '自动复核'];
+
+interface ProjectBrief {
+  businessLine: string;
+  coreGoal: string;
+  deliverables: string;
+  milestones: string;
+  references: string;
+}
+
+interface BusinessTemplate {
+  title: string;
+  items: string[];
+}
+
+const BUSINESS_TEMPLATES: Record<string, BusinessTemplate> = {
+  博物馆: {
+    title: '博物馆展览策划模板',
+    items: [
+      '展览主题与定位',
+      '目标受众分析',
+      '展览叙事线（故事结构、章节划分）',
+      '观众动线设计',
+      '展品清单与布展方案',
+      '教育与公共活动规划',
+      '国内外参考案例（至少3个）',
+      '预算估算',
+      '时间表与里程碑',
+      '风险预判与应对',
+    ],
+  },
+  房地产: {
+    title: '房地产调研报告模板',
+    items: [
+      '研究主题与范围',
+      '核心摘要（3-5句关键发现）',
+      '关键数据表（指标/数值/来源/时间）',
+      '政策与监管动态',
+      '市场供需分析',
+      '价格走势与趋势判断',
+      '竞品/周边项目分析',
+      '风险与不确定性',
+      '信息来源清单',
+      '研究员建议（标注为推测）',
+    ],
+  },
+  企业策划: {
+    title: '企业策划提案模板',
+    items: [
+      '项目背景与客户需求理解',
+      '核心策略与创意方向',
+      '执行方案（分阶段、可落地）',
+      '时间节点与交付物清单',
+      '预算框架',
+      '预期效果与评估指标',
+      '风险预判与备选方案',
+      '团队分工（如适用）',
+    ],
+  },
+  咖啡清吧: {
+    title: '咖啡清吧产品/活动方案模板',
+    items: [
+      '方案主题与目标',
+      '目标客群画像',
+      '产品/活动内容详情',
+      '视觉风格方向',
+      '季节性与在地化考量',
+      '成本估算',
+      '推广渠道建议',
+      '时间安排',
+    ],
+  },
+  餐饮: {
+    title: '餐饮策划模板',
+    items: [
+      '项目定位与目标',
+      '客群画像与消费场景',
+      '竞品分析',
+      '菜单/产品策略',
+      '选址分析（如适用）',
+      '运营节奏规划',
+      '品牌视觉方向',
+      '预算与收益预估',
+    ],
+  },
+  占星: {
+    title: '占星内容模板',
+    items: [
+      '主题与切入角度',
+      '占星术语与概念说明（确保准确）',
+      '内容正文',
+      '调性检查：神秘但不故弄玄虚，温暖有洞察',
+    ],
+  },
+};
 
 const PINYIN: Record<string, string> = {
   博: 'bo',
@@ -194,12 +291,31 @@ export class DispatchManager {
     };
     await writeBoard(path, board);
     await writeGovernanceFiles(path, board);
+    const brief = projectBrief(cleanName, board.project.goal);
+    const template = BUSINESS_TEMPLATES[brief.businessLine];
     await writeFile(
       join(path, 'project.md'),
       [
         `# ${cleanName}`,
         '',
-        `项目目标：${board.project.goal || '未填写'}`,
+        '## 项目立项',
+        '',
+        `项目名称：${cleanName}`,
+        `业务线：${brief.businessLine}`,
+        `核心目标：${brief.coreGoal}`,
+        `交付物：${brief.deliverables}`,
+        `关键节点：${brief.milestones}`,
+        `参考方向：${brief.references}`,
+        '',
+        '## 业务线交付模板',
+        '',
+        template
+          ? [`### ${template.title}`, '', ...template.items.map((item, index) => `${index + 1}. ${item}`)].join('\n')
+          : '未识别业务线。请在项目名称里使用：博物馆 / 咖啡清吧 / 餐饮 / 房地产 / 占星 / 企业策划。',
+        '',
+        '## 质量复核标准',
+        '',
+        ...QUALITY_REVIEW_DIMENSIONS.map((item) => `- ${item}`),
         '',
         '## 运行约定',
         '',
@@ -209,7 +325,8 @@ export class DispatchManager {
         '- task_board.json 是唯一可信任务状态源。',
         '- 09_dispatch_board.md 是主控可读看板，由系统从 task_board.json 同步生成。',
         '- 执行结果必须写入 outputs/ 后再进入复核。',
-        '- 主控验收必须检查结果完整性、索引状态、队列状态和越权写入风险。',
+        '- 主控验收必须检查结果完整性、索引状态、队列状态、越权写入风险和质量复核维度。',
+        '- 材料不足必须写“无法判断”或“需要补充的信息”，不得自行脑补。',
         '',
       ].join('\n'),
       'utf8',
@@ -296,8 +413,10 @@ export class DispatchManager {
         '',
         '## 验收标准',
         '',
-        '- 输出包含：核心结论、执行过程摘要、产出或发现、风险/阻塞、下一步建议。',
-        '- 主控验收时会检查越权写入风险。',
+        '- 输出包含：核心结论、执行过程摘要、产出或发现、风险/阻塞、下一步建议、自动复核。',
+        `- 自动复核必须覆盖：${QUALITY_REVIEW_DIMENSIONS.join('、')}。`,
+        '- 调研类任务必须列来源和时间；单一来源信息必须标注“待验证”。',
+        '- 主控验收时会检查越权写入风险和质量复核完整性。',
         '',
       ].join('\n'),
       'utf8',
@@ -482,10 +601,13 @@ export class DispatchManager {
     const body = (await readFile(outputPath, 'utf8').catch(() => '')).trim();
     if (!body) throw new DispatchError(`${task.id} 还没有可读取的结果文件：${outputRel}`);
 
-    const requiredSections = ['核心结论', '执行过程摘要', '产出或发现', '风险/阻塞', '下一步建议'];
-    const missingSections = requiredSections.filter((section) => !body.includes(section));
+    const missingSections = RESULT_REQUIRED_SECTIONS.filter((section) => !body.includes(section));
+    const missingReviewDimensions = QUALITY_REVIEW_DIMENSIONS.filter((item) => !body.includes(item));
     const findings: string[] = [];
     if (missingSections.length) findings.push(`缺少必要章节：${missingSections.join('、')}`);
+    if (missingReviewDimensions.length) {
+      findings.push(`自动复核缺少质量维度：${missingReviewDimensions.join('、')}`);
+    }
     const overreachFiles = (task.overreachFiles ?? []).filter(Boolean);
     if (overreachFiles.length) findings.push(`发现越权写入风险：${overreachFiles.join('、')}`);
     const statusText = findings.length ? 'rework' : 'accepted';
@@ -504,8 +626,13 @@ export class DispatchManager {
         '',
         `- 结果文件：${body ? '通过' : '不通过'}`,
         `- 必要章节：${missingSections.length ? '不通过' : '通过'}`,
+        `- 自动复核维度：${missingReviewDimensions.length ? '不通过' : '通过'}`,
         `- 越权写入风险：${overreachFiles.length ? '不通过' : '通过'}`,
         '- 队列状态：已由主控更新到验收结论。',
+        '',
+        '## 质量维度',
+        '',
+        ...QUALITY_REVIEW_DIMENSIONS.map((item) => `- ${item}：${missingReviewDimensions.includes(item) ? '缺失' : '已覆盖'}`),
         '',
         '## 问题记录',
         '',
@@ -811,7 +938,7 @@ function agentHelp(): string {
 }
 
 function assignmentMessage(projectPath: string, board: DispatchBoard, task: DispatchTask): string {
-  return `你收到一个执行任务。\n项目：${board.project.name}\n项目 slug：${board.project.slug}\n项目目录：${projectPath}\n任务：${task.id} ${task.title}\n输出文件：${task.output || `outputs/${task.id}-result.md`}\n\n任务说明：\n${task.instructions}\n\n执行方式：\n/agent run ${task.id} ${board.project.slug}\n\n完成后主控会用：\n/agent result ${task.id} ${board.project.slug}`;
+  return `你收到一个执行任务。\n项目：${board.project.name}\n项目 slug：${board.project.slug}\n项目目录：${projectPath}\n任务：${task.id} ${task.title}\n输出文件：${task.output || `outputs/${task.id}-result.md`}\n\n任务说明：\n${task.instructions}\n\n执行方式：\n/agent run ${task.id} ${board.project.slug}\n\n完成后主控会用：\n/agent review ${task.id} ${board.project.slug}`;
 }
 
 function workerPrompt(projectPath: string, board: DispatchBoard, task: DispatchTask, chatId: string): string {
@@ -820,6 +947,7 @@ function workerPrompt(projectPath: string, board: DispatchBoard, task: DispatchT
 主控才可以更新 task_board.json、09_dispatch_board.md、reviews/、project.md 和治理机制文件。
 你只允许写入：outputs/${task.id}-result.md、worker_state/${task.id}.json。
 完成后必须把结果写入指定输出文件，并在最终回复里给出简短完成摘要。
+输出要结论先行，不写空话；材料不足时明确写“无法判断”或“需要补充的信息”。
 
 飞书 chat_id：${chatId || 'unknown'}
 项目：${board.project.name}
@@ -831,7 +959,9 @@ ${task.instructions}
 
 必须写入结果文件：outputs/${task.id}-result.md
 建议同步写入本地状态：worker_state/${task.id}.json，status=submitted_for_review。
-结果文件必须包含：核心结论、执行过程摘要、产出或发现、风险/阻塞、下一步建议。`;
+结果文件必须包含：核心结论、执行过程摘要、产出或发现、风险/阻塞、下一步建议、自动复核。
+自动复核必须覆盖：${QUALITY_REVIEW_DIMENSIONS.join('、')}。
+调研类任务必须列来源和时间；单一来源信息必须标注“待验证”。`;
 }
 
 function runProcess(command: string, args: string[], opts: { cwd: string; timeoutMs: number }): Promise<ProcessResult> {
@@ -1155,6 +1285,35 @@ function normalizeWorkerName(value: string): string {
     .slice(0, 40);
 }
 
+function projectBrief(name: string, body: string): ProjectBrief {
+  const text = `${name}\n${body || ''}`;
+  const businessLine = BUSINESS_LINES.find((line) => text.includes(line)) ?? '未填写';
+  return {
+    businessLine,
+    coreGoal: fieldValue(body, ['核心目标', '项目目标', '目标']) || String(body || '').trim() || '未填写',
+    deliverables: fieldValue(body, ['交付物', '最终交付', '输出']) || '未填写',
+    milestones: fieldValue(body, ['关键节点', '时间节点', '截止日期', '里程碑']) || '未填写',
+    references: fieldValue(body, ['参考方向', '参考资料', '特殊要求']) || '未填写',
+  };
+}
+
+function fieldValue(body: string, labels: string[]): string {
+  const lines = String(body || '').split(/\r?\n/);
+  for (const line of lines) {
+    const trimmed = line.trim();
+    for (const label of labels) {
+      const re = new RegExp(`^(?:[-*]\\s*)?${escapeRegExp(label)}\\s*[：:]\\s*(.+)$`);
+      const match = trimmed.match(re);
+      if (match?.[1]?.trim()) return match[1].trim();
+    }
+  }
+  return '';
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function nowText(): string {
   const d = new Date();
   const pad = (n: number): string => String(n).padStart(2, '0');
@@ -1241,7 +1400,7 @@ function agentBoardCard(projectPath: string, board: DispatchBoard): object {
       }
       if (isReviewableTask(task)) {
         buttons.push(
-          { text: '通过', value: { cmd: 'agent.mark', arg: `${task.id} accepted ${board.project.slug}` }, style: 'primary' },
+          { text: '自动验收', value: { cmd: 'agent.review', arg: `${task.id} ${board.project.slug}` }, style: 'primary' },
           { text: '返工', value: { cmd: 'agent.mark', arg: `${task.id} rework ${board.project.slug}` }, style: 'danger' },
           { text: '归档完成', value: { cmd: 'agent.mark', arg: `${task.id} done ${board.project.slug}` } },
         );
@@ -1280,7 +1439,7 @@ function agentTaskReviewCard(projectSlug: string, board: DispatchBoard, task: Di
     HR,
     divMd(resultText.slice(0, 2500)),
     actions([
-      { text: '通过', value: { cmd: 'agent.mark', arg: `${task.id} accepted ${board.project.slug}` }, style: 'primary' },
+      { text: '自动验收', value: { cmd: 'agent.review', arg: `${task.id} ${board.project.slug}` }, style: 'primary' },
       { text: '返工', value: { cmd: 'agent.mark', arg: `${task.id} rework ${board.project.slug}` }, style: 'danger' },
       { text: '归档完成', value: { cmd: 'agent.mark', arg: `${task.id} done ${board.project.slug}` } },
       { text: '任务板', value: { cmd: 'agent.status', arg: board.project.slug } },

@@ -48,6 +48,14 @@ describe('dispatch helper', () => {
     await expect(readFile(join(project.path, '07_上下文窗口治理机制.md'), 'utf8')).resolves.toMatch(/越权写入/);
     await expect(readFile(join(project.path, '09_dispatch_board.md'), 'utf8')).resolves.toMatch(/执行对话不得直接修改/);
     await expect(readFile(join(project.path, 'templates', 'worker_startup_instruction.md'), 'utf8')).resolves.toMatch(/outputs\/\{task_id\}-result.md/);
+    const projectMd = await readFile(join(project.path, 'project.md'), 'utf8');
+    expect(projectMd).toMatch(/## 项目立项/);
+    expect(projectMd).toMatch(/业务线：企业策划/);
+    expect(projectMd).toMatch(/交付物：未填写/);
+    expect(projectMd).toMatch(/关键节点：未填写/);
+    expect(projectMd).toMatch(/参考方向：未填写/);
+    expect(projectMd).toMatch(/企业策划提案模板/);
+    expect(projectMd).toMatch(/预期效果与评估指标/);
 
     const task = await manager.addTask(project.slug, '案例调研', '整理一个案例');
     expect(task).toMatchObject({ id: 'T-001', status: 'pending' });
@@ -192,6 +200,14 @@ describe('dispatch helper', () => {
         '## 下一步建议',
         '主控合并。',
         '',
+        '## 自动复核',
+        '- 事实准确性：通过。',
+        '- 逻辑完整性：通过。',
+        '- 执行可行性：通过。',
+        '- 表达质量：通过。',
+        '- 遗漏风险：通过。',
+        '- 方案影响：通过。',
+        '',
       ].join('\n'),
       'utf8',
     );
@@ -202,6 +218,46 @@ describe('dispatch helper', () => {
     expect(review.task.status).toBe('accepted');
     expect(review.reviewFile).toBe('reviews/T-001-review.md');
     await expect(readFile(join(project.path, 'reviews', 'T-001-review.md'), 'utf8')).resolves.toMatch(/验收结论：accepted/);
+    await expect(readFile(join(project.path, 'reviews', 'T-001-review.md'), 'utf8')).resolves.toMatch(/事实准确性/);
+  });
+
+  it('requires worker self-review against Huaring quality dimensions', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'feishu-dispatch-review-rubric-'));
+    const manager = new DispatchManager({
+      projectsDir: join(root, 'projects'),
+      codexBin: 'codex',
+      defaultCwd: root,
+    });
+    const project = await manager.createProject('quality rubric', '验证华荣质量复核');
+    await manager.addTask(project.slug, '缺自动复核', '写完整业务正文但缺少自检');
+    await writeFile(
+      join(project.path, 'outputs', 'T-001-result.md'),
+      [
+        '## 核心结论',
+        '可继续。',
+        '',
+        '## 执行过程摘要',
+        '已完成。',
+        '',
+        '## 产出或发现',
+        '有可用材料。',
+        '',
+        '## 风险/阻塞',
+        '暂无。',
+        '',
+        '## 下一步建议',
+        '主控合并。',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    await manager.markTask(project.slug, 'T-001', 'reviewing');
+
+    const review = await manager.reviewTask(project.slug, 'T-001');
+
+    expect(review.task.status).toBe('rework');
+    expect(review.findings.join('\n')).toMatch(/自动复核/);
+    expect(review.findings.join('\n')).toMatch(/事实准确性/);
   });
 
   it('turns incomplete review results into rework from /agent review', async () => {
@@ -407,6 +463,7 @@ describe('dispatch helper', () => {
     expect(sentCardCallbacks).toContainEqual({ cmd: 'agent.run', arg: `T-001 ${project.slug}` });
     expect(sentCardCallbacks).toContainEqual({ cmd: 'agent.status', arg: project.slug });
     expect(sentCards[0]?.fallback).toMatch(/\/agent run T-001/);
+    expect(sentCards[0]?.fallback).toMatch(/\/agent review T-001/);
 
     const assignedBoard = JSON.parse(await readFile(join(project.path, 'task_board.json'), 'utf8'));
     expect(assignedBoard.tasks[0]).toMatchObject({
@@ -444,7 +501,8 @@ describe('dispatch helper', () => {
     expect(cards).toHaveLength(1);
     expect(cards[0]?.card).toMatchObject({ schema: '2.0' });
     const callbacks = callbackValues(cards[0]?.card);
-    expect(callbacks).toContainEqual({ cmd: 'agent.mark', arg: `T-001 accepted ${project.slug}` });
+    expect(callbacks).toContainEqual({ cmd: 'agent.review', arg: `T-001 ${project.slug}` });
+    expect(callbacks).not.toContainEqual({ cmd: 'agent.mark', arg: `T-001 accepted ${project.slug}` });
     expect(callbacks).toContainEqual({ cmd: 'agent.mark', arg: `T-001 rework ${project.slug}` });
     expect(callbacks).toContainEqual({ cmd: 'agent.mark', arg: `T-001 done ${project.slug}` });
     expect(callbacks).toContainEqual({ cmd: 'agent.status', arg: project.slug });
@@ -483,6 +541,8 @@ describe('dispatch helper', () => {
     expect(callbacks).not.toContainEqual({ cmd: 'agent.run', arg: `T-002 ${project.slug}` });
     expect(callbacks).not.toContainEqual({ cmd: 'agent.mark', arg: `T-001 accepted ${project.slug}` });
     expect(callbacks).not.toContainEqual({ cmd: 'agent.mark', arg: `T-002 accepted ${project.slug}` });
+    expect(callbacks).not.toContainEqual({ cmd: 'agent.review', arg: `T-001 ${project.slug}` });
+    expect(callbacks).not.toContainEqual({ cmd: 'agent.review', arg: `T-002 ${project.slug}` });
     expect(callbacks).not.toContainEqual({ cmd: 'agent.mark', arg: `T-001 rework ${project.slug}` });
     expect(callbacks).not.toContainEqual({ cmd: 'agent.mark', arg: `T-002 rework ${project.slug}` });
   });
