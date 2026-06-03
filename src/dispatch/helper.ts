@@ -26,7 +26,7 @@ const boardLocks = new Map<string, Promise<void>>();
 const BUSINESS_LINES = ['博物馆', '咖啡清吧', '餐饮', '房地产', '占星', '企业策划'] as const;
 const QUALITY_REVIEW_DIMENSIONS = ['事实准确性', '逻辑完整性', '执行可行性', '表达质量', '遗漏风险', '方案影响'];
 const RESULT_REQUIRED_SECTIONS = ['核心结论', '执行过程摘要', '产出或发现', '风险/阻塞', '下一步建议', '自动复核'];
-const RESEARCH_KEYWORDS = ['调研', '研究', '政策', '市场', '数据', '案例', '竞品', '房地产', '来源'];
+const RESEARCH_KEYWORDS = ['调研', '研究', '政策', '市场', '数据', '竞品', '房地产'];
 const PLAN_FIRST_KEYWORDS = ['需要计划确认', '复杂', '多阶段', '策划方案', '调研报告', '实施方案', '执行方案'];
 
 interface ProjectBrief {
@@ -1441,8 +1441,17 @@ function requiresPlan(task: DispatchTask): boolean {
 }
 
 function requiresSources(board: DispatchBoard, task: DispatchTask): boolean {
-  const text = `${board.project.name}\n${board.project.goal}\n${task.title}\n${task.instructions}`;
-  return RESEARCH_KEYWORDS.some((keyword) => text.includes(keyword));
+  const text = sourceRequirementText(`${board.project.name}\n${board.project.goal}\n${task.title}\n${task.instructions}`);
+  return (
+    RESEARCH_KEYWORDS.some((keyword) => text.includes(keyword)) ||
+    /(案例调研|案例研究|参考案例|案例分析|案例资料)/.test(text)
+  );
+}
+
+function sourceRequirementText(text: string): string {
+  return String(text || '')
+    .replace(/(?:不是|不属于|非|无需|不需要|不用|不做)(?:业务)?(?:调研|研究|政策研究|市场研究|数据研究|案例研究|案例调研|竞品分析|房地产调研)/g, '')
+    .replace(/(?:不联网|无需联网|不读取外部资料|不查外部资料|不使用外部资料)/g, '');
 }
 
 async function assessSources(body: string, sourceUrlCheck?: SourceUrlCheck): Promise<{ ok: boolean; reason: string }> {

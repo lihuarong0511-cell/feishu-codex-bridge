@@ -331,6 +331,56 @@ describe('dispatch helper', () => {
     expect(review.findings.join('\n')).toMatch(/信息来源/);
   });
 
+  it('does not require source lists for local validation runbooks that are not research tasks', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'feishu-dispatch-validation-no-sources-'));
+    const manager = new DispatchManager({
+      projectsDir: join(root, 'projects'),
+      codexBin: 'codex',
+      defaultCwd: root,
+    });
+    const project = await manager.createProject('【企业策划】真实按钮演练', '核心目标：验证飞书按钮链路');
+    await manager.addTask(
+      project.slug,
+      '真实按钮执行链路验证',
+      '这是一次飞书真实按钮链路演练，不是业务调研。不联网，不读取外部资料。',
+    );
+    await writeFile(
+      join(project.path, 'outputs', 'T-001-result.md'),
+      [
+        '## 核心结论',
+        '按钮链路验证报告已生成。',
+        '',
+        '## 执行过程摘要',
+        '已按本地演练任务执行，未联网，未读取外部来源。',
+        '',
+        '## 产出或发现',
+        '当前材料无法判断外部飞书事件载荷，只能记录本地执行结果。',
+        '',
+        '## 风险/阻塞',
+        '需要补充的信息：线上服务日志可用于主控二次核验。',
+        '',
+        '## 下一步建议',
+        '由主控读取 task_board.json 和服务日志确认真实点击链路。',
+        '',
+        '## 自动复核',
+        '- 事实准确性：通过。',
+        '- 逻辑完整性：通过。',
+        '- 执行可行性：通过。',
+        '- 表达质量：通过。',
+        '- 遗漏风险：通过。',
+        '- 方案影响：通过。',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    await manager.markTask(project.slug, 'T-001', 'reviewing');
+
+    const review = await manager.reviewTask(project.slug, 'T-001');
+
+    expect(review.task.status).toBe('accepted');
+    expect(review.findings.join('\n')).not.toMatch(/信息来源|单一来源/);
+  });
+
   it('returns single-source research outputs without pending-verification labels to rework', async () => {
     const root = await mkdtemp(join(tmpdir(), 'feishu-dispatch-single-source-'));
     const manager = new DispatchManager({
