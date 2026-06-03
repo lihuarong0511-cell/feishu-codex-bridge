@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
@@ -92,6 +92,9 @@ export interface DispatchTask {
   updatedAt: string;
   output: string;
   error?: string;
+  overreachFiles?: string[];
+  review?: string;
+  reviewFindings?: string[];
 }
 
 interface DispatchBoard {
@@ -174,6 +177,9 @@ export class DispatchManager {
     await mkdir(join(path, 'tasks'));
     await mkdir(join(path, 'progress'));
     await mkdir(join(path, 'outputs'));
+    await mkdir(join(path, 'reviews'));
+    await mkdir(join(path, 'worker_state'));
+    await mkdir(join(path, 'templates'));
     const now = nowText();
     const board: DispatchBoard = {
       version: 1,
@@ -187,6 +193,7 @@ export class DispatchManager {
       tasks: [],
     };
     await writeBoard(path, board);
+    await writeGovernanceFiles(path, board);
     await writeFile(
       join(path, 'project.md'),
       [
@@ -198,8 +205,11 @@ export class DispatchManager {
         '',
         '- 主控对话负责拆解、分派、复核和合并。',
         '- 执行对话只处理被分配的单项任务。',
+        '- 执行对话只写自己的 outputs/ 与 worker_state/ 文件。',
         '- task_board.json 是唯一可信任务状态源。',
+        '- 09_dispatch_board.md 是主控可读看板，由系统从 task_board.json 同步生成。',
         '- 执行结果必须写入 outputs/ 后再进入复核。',
+        '- 主控验收必须检查结果完整性、索引状态、队列状态和越权写入风险。',
         '',
       ].join('\n'),
       'utf8',
@@ -267,9 +277,32 @@ export class DispatchManager {
     });
     await writeFile(
       join(projectPath, 'tasks', `${task.id}.md`),
-      `# ${task.id} ${cleanTitle}\n\n项目：${board.project.name}\n状态：pending\n输出文件：outputs/${task.id}-result.md\n\n## 任务说明\n\n${cleanInstructions}\n`,
+      [
+        `# ${task.id} ${cleanTitle}`,
+        '',
+        `项目：${board.project.name}`,
+        '状态：pending',
+        `输出文件：outputs/${task.id}-result.md`,
+        '',
+        '## 任务说明',
+        '',
+        cleanInstructions,
+        '',
+        '## 执行边界',
+        '',
+        `- 只允许写入 outputs/${task.id}-result.md。`,
+        `- 只允许写入 worker_state/${task.id}.json。`,
+        '- 不允许修改 task_board.json、09_dispatch_board.md、project.md、治理机制文件或其它任务文件。',
+        '',
+        '## 验收标准',
+        '',
+        '- 输出包含：核心结论、执行过程摘要、产出或发现、风险/阻塞、下一步建议。',
+        '- 主控验收时会检查越权写入风险。',
+        '',
+      ].join('\n'),
       'utf8',
     );
+    await writeWorkerState(projectPath, task, 'pending', '任务已登记，等待主控派发。');
     return task;
   }
 
@@ -300,6 +333,8 @@ export class DispatchManager {
       return { board, task: { ...task } };
     });
     await appendProgress(projectPath, task.id, 'running', '开始执行。');
+    await writeWorkerState(projectPath, task, 'running', '主控已派发，执行对话开始处理。');
+    const beforeSnapshot = await fileSnapshot(projectPath);
 
     const lastMessage = join(projectPath, 'progress', `${task.id}-last-message.md`);
     const args = [
@@ -329,6 +364,7 @@ export class DispatchManager {
     const sessionId = extractSessionId(result.stdout);
     const body = await readFile(lastMessage, 'utf8').catch(() => result.stdout);
     const outputPath = join(projectPath, 'outputs', `${task.id}-result.md`);
+    const overreachFiles = await detectWorkerOverreach(projectPath, task.id, beforeSnapshot);
     const existingOutput = await readFile(outputPath, 'utf8').catch(() => '');
     if (!existingOutput.trim()) {
       await writeFile(
@@ -354,10 +390,12 @@ export class DispatchManager {
       const updated = findTask(board, task.id);
       updated.status = 'reviewing';
       updated.sessionId = sessionId;
+      updated.overreachFiles = overreachFiles;
       updated.updatedAt = nowText();
       board.project.updatedAt = updated.updatedAt;
       return { ...updated };
     });
+    await writeWorkerState(projectPath, updated, 'submitted_for_review', '执行完成，等待主控验收。');
     await appendProgress(projectPath, task.id, 'reviewing', `执行完成，结果写入 outputs/${task.id}-result.md`);
     return updated;
   }
@@ -422,6 +460,72 @@ export class DispatchManager {
     });
     await appendProgress(projectPath, task.id, normalized, '主控手动更新状态。');
     return task;
+  }
+
+  async reviewTask(projectSlug: string, taskId: string): Promise<{
+    task: DispatchTask;
+    status: string;
+    findings: string[];
+    reviewFile: string;
+  }> {
+    const projectPath = await this.projectPath(projectSlug);
+    const board = await readBoard(projectPath);
+    const task = findTask(board, taskId);
+    if (!REVIEWABLE_STATUSES.has(task.status) && task.status !== 'accepted' && task.status !== 'rework') {
+      throw new DispatchError(`${task.id} 当前状态是 ${task.status}，不能验收。`);
+    }
+    const outputRel = String(task.output || `outputs/${task.id}-result.md`);
+    const outputPath = resolve(projectPath, outputRel);
+    if (!outputPath.startsWith(`${projectPath}/`) && outputPath !== projectPath) {
+      throw new DispatchError('任务结果路径不合法。');
+    }
+    const body = (await readFile(outputPath, 'utf8').catch(() => '')).trim();
+    if (!body) throw new DispatchError(`${task.id} 还没有可读取的结果文件：${outputRel}`);
+
+    const requiredSections = ['核心结论', '执行过程摘要', '产出或发现', '风险/阻塞', '下一步建议'];
+    const missingSections = requiredSections.filter((section) => !body.includes(section));
+    const findings: string[] = [];
+    if (missingSections.length) findings.push(`缺少必要章节：${missingSections.join('、')}`);
+    const overreachFiles = (task.overreachFiles ?? []).filter(Boolean);
+    if (overreachFiles.length) findings.push(`发现越权写入风险：${overreachFiles.join('、')}`);
+    const statusText = findings.length ? 'rework' : 'accepted';
+    const reviewFile = `reviews/${task.id}-review.md`;
+    await writeFile(
+      join(projectPath, reviewFile),
+      [
+        `# ${task.id} 主控验收`,
+        '',
+        `项目：${board.project.name}`,
+        `任务：${task.title}`,
+        `验收结论：${statusText}`,
+        `验收时间：${nowText()}`,
+        '',
+        '## 核验项',
+        '',
+        `- 结果文件：${body ? '通过' : '不通过'}`,
+        `- 必要章节：${missingSections.length ? '不通过' : '通过'}`,
+        `- 越权写入风险：${overreachFiles.length ? '不通过' : '通过'}`,
+        '- 队列状态：已由主控更新到验收结论。',
+        '',
+        '## 问题记录',
+        '',
+        findings.length ? findings.map((item) => `- ${item}`).join('\n') : '- 未发现阻塞问题。',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    const updated = await updateBoard(projectPath, (board) => {
+      const task = findTask(board, taskId);
+      task.status = statusText;
+      task.review = reviewFile;
+      task.reviewFindings = findings;
+      task.updatedAt = nowText();
+      board.project.updatedAt = task.updatedAt;
+      return { ...task };
+    });
+    await writeWorkerState(projectPath, updated, statusText, '主控验收完成。');
+    await appendProgress(projectPath, task.id, statusText, `主控自动验收：${statusText === 'accepted' ? '通过。' : '需返工。'}`);
+    return { task: updated, status: statusText, findings, reviewFile };
   }
 
   async taskResultText(projectSlug: string, taskId: string, maxChars = 2800): Promise<string> {
@@ -607,7 +711,20 @@ export async function handleAgentCommand(opts: HandleAgentCommandOptions): Promi
       }
       return;
     }
-    if (sub === 'result' || sub === 'show' || sub === 'review') {
+    if (sub === 'review') {
+      if (!parts[1]) {
+        await reply('用法：/agent review T-001 [项目slug]');
+        return;
+      }
+      const projectSlug = parts[2] || await manager.defaultProjectSlug();
+      const review = await manager.reviewTask(projectSlug, parts[1].toUpperCase());
+      const findings = review.findings.length
+        ? review.findings.map((item) => `- ${item}`).join('\n')
+        : '- 未发现阻塞问题。';
+      await reply(`主控验收完成：${review.task.id} -> ${review.task.status}\n复核文件：${review.reviewFile}\n问题记录：\n${findings}`);
+      return;
+    }
+    if (sub === 'result' || sub === 'show') {
       if (!parts[1]) {
         await reply('用法：/agent result T-001 [项目slug]');
         return;
@@ -686,9 +803,10 @@ function agentHelp(): string {
     '/agent run all [项目slug]',
     '/agent status [项目slug]',
     '/agent result T-001 [项目slug]',
+    '/agent review T-001 [项目slug]',
     '/agent mark T-001 accepted|rework|done [项目slug]',
     '',
-    '约定：主控负责分派和复核；执行对话只处理被分配任务并写 outputs。',
+    '约定：主控负责分派和复核；执行对话只处理被分配任务并写 outputs/ 与 worker_state/。',
   ].join('\n');
 }
 
@@ -699,6 +817,8 @@ function assignmentMessage(projectPath: string, board: DispatchBoard, task: Disp
 function workerPrompt(projectPath: string, board: DispatchBoard, task: DispatchTask, chatId: string): string {
   return `你是 feishu-codex-bridge 多对话调度系统中的执行对话，不是主控。
 只完成当前任务，不要改动其它任务，不要删除用户或其它执行对话的文件。
+主控才可以更新 task_board.json、09_dispatch_board.md、reviews/、project.md 和治理机制文件。
+你只允许写入：outputs/${task.id}-result.md、worker_state/${task.id}.json。
 完成后必须把结果写入指定输出文件，并在最终回复里给出简短完成摘要。
 
 飞书 chat_id：${chatId || 'unknown'}
@@ -710,6 +830,7 @@ function workerPrompt(projectPath: string, board: DispatchBoard, task: DispatchT
 ${task.instructions}
 
 必须写入结果文件：outputs/${task.id}-result.md
+建议同步写入本地状态：worker_state/${task.id}.json，status=submitted_for_review。
 结果文件必须包含：核心结论、执行过程摘要、产出或发现、风险/阻塞、下一步建议。`;
 }
 
@@ -763,6 +884,148 @@ async function writeBoard(projectPath: string, board: DispatchBoard): Promise<vo
   const tmp = join(projectPath, `task_board.json.tmp-${process.pid}-${randomUUID()}`);
   await writeFile(tmp, `${JSON.stringify(board, null, 2)}\n`, 'utf8');
   await rename(tmp, join(projectPath, 'task_board.json'));
+  await refreshDispatchBoard(projectPath, board);
+}
+
+async function writeGovernanceFiles(projectPath: string, board: DispatchBoard): Promise<void> {
+  await writeFile(
+    join(projectPath, '07_上下文窗口治理机制.md'),
+    [
+      '# 07_上下文窗口治理机制',
+      '',
+      '## 角色分工',
+      '',
+      '- 主控对话：拆解任务、派发执行对话、读取状态、验收结果、更新看板、裁决是否返工或合并。',
+      '- 执行对话：只处理被分配的单项任务，不抢主控职责，不改其它任务。',
+      '- 文件系统：承载持久状态；对话上下文只承载当前执行所需信息。',
+      '',
+      '## 写入边界',
+      '',
+      '- 执行对话只允许写自己的 outputs/<task-id>-result.md 与 worker_state/<task-id>.json。',
+      '- 主控系统独占写入 task_board.json、09_dispatch_board.md、reviews/、handoff.md。',
+      '- 禁止执行对话修改 project.md、治理机制文件、其它任务文件或删除用户文件。',
+      '',
+      '## 验收规则',
+      '',
+      '- 核验结果文件是否存在且包含必要章节。',
+      '- 核验 task_board.json 与 09_dispatch_board.md 的队列状态是否一致。',
+      '- 核验是否存在越权写入风险；一旦发现，任务进入 rework。',
+      '- 主控验收记录写入 reviews/<task-id>-review.md。',
+      '',
+    ].join('\n'),
+    'utf8',
+  );
+  await writeFile(
+    join(projectPath, 'templates', 'worker_startup_instruction.md'),
+    [
+      '# 执行对话启动指令模板',
+      '',
+      '你是执行对话，不是主控。',
+      '',
+      '项目：{project_name}',
+      '任务ID：{task_id}',
+      '任务标题：{task_title}',
+      '',
+      '## 任务说明',
+      '',
+      '{task_instructions}',
+      '',
+      '## 只允许写入',
+      '',
+      '- outputs/{task_id}-result.md',
+      '- worker_state/{task_id}.json',
+      '',
+      '## 禁止写入',
+      '',
+      '- task_board.json',
+      '- 09_dispatch_board.md',
+      '- project.md',
+      '- reviews/',
+      '- 其它任务的 tasks/progress/outputs/worker_state 文件',
+      '',
+      '## 结果文件必须包含',
+      '',
+      '核心结论、执行过程摘要、产出或发现、风险/阻塞、下一步建议。',
+      '',
+    ].join('\n'),
+    'utf8',
+  );
+  await refreshDispatchBoard(projectPath, board);
+}
+
+async function refreshDispatchBoard(projectPath: string, board: DispatchBoard): Promise<void> {
+  const rows = [
+    '| 任务ID | 状态 | 标题 | 输出 | 复核 | 越权风险 |',
+    '| --- | --- | --- | --- | --- | --- |',
+  ];
+  for (const task of board.tasks) {
+    rows.push(
+      `| ${task.id} | ${task.status} | ${String(task.title || '').replace(/\|/g, '/')} | ${task.output || ''} | ${task.review || ''} | ${(task.overreachFiles ?? []).length ? (task.overreachFiles ?? []).join('、') : '无'} |`,
+    );
+  }
+  if (rows.length === 2) rows.push('| - | - | 暂无任务 | - | - | - |');
+  await writeFile(
+    join(projectPath, '09_dispatch_board.md'),
+    [
+      '# 09_dispatch_board',
+      '',
+      `项目：${board.project?.name || projectPath}`,
+      `更新时间：${board.project?.updatedAt || nowText()}`,
+      '',
+      '这张看板由主控系统从 task_board.json 同步生成；执行对话不得直接修改。',
+      '',
+      ...rows,
+      '',
+    ].join('\n'),
+    'utf8',
+  );
+}
+
+async function writeWorkerState(projectPath: string, task: DispatchTask, statusText: string, note: string): Promise<void> {
+  await mkdir(join(projectPath, 'worker_state'), { recursive: true });
+  await writeFile(
+    join(projectPath, 'worker_state', `${task.id}.json`),
+    `${JSON.stringify({
+      taskId: task.id,
+      title: task.title,
+      status: statusText,
+      note,
+      updatedAt: nowText(),
+    }, null, 2)}\n`,
+    'utf8',
+  );
+}
+
+async function fileSnapshot(projectPath: string): Promise<Record<string, string>> {
+  const snapshot: Record<string, string> = {};
+  async function walk(dir: string): Promise<void> {
+    const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      const path = join(dir, entry.name);
+      const rel = path.slice(projectPath.length + 1);
+      if (entry.isDirectory()) {
+        await walk(path);
+      } else if (entry.isFile() && !rel.includes('.tmp')) {
+        const body = await readFile(path).catch(() => Buffer.from(''));
+        snapshot[rel] = createHash('sha256').update(body).digest('hex');
+      }
+    }
+  }
+  await walk(projectPath);
+  return snapshot;
+}
+
+async function detectWorkerOverreach(projectPath: string, taskId: string, before: Record<string, string>): Promise<string[]> {
+  const after = await fileSnapshot(projectPath);
+  const allowed = new Set([
+    `outputs/${taskId}-result.md`,
+    `worker_state/${taskId}.json`,
+    `progress/${taskId}-last-message.md`,
+  ]);
+  return Object.entries(after)
+    .filter(([rel, digest]) => before[rel] !== digest && !allowed.has(rel))
+    .map(([rel]) => rel)
+    .sort();
 }
 
 async function updateBoard<T>(

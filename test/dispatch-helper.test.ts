@@ -42,6 +42,12 @@ describe('dispatch helper', () => {
     await stat(join(project.path, 'tasks'));
     await stat(join(project.path, 'progress'));
     await stat(join(project.path, 'outputs'));
+    await stat(join(project.path, 'reviews'));
+    await stat(join(project.path, 'worker_state'));
+    await stat(join(project.path, 'templates', 'worker_startup_instruction.md'));
+    await expect(readFile(join(project.path, '07_上下文窗口治理机制.md'), 'utf8')).resolves.toMatch(/越权写入/);
+    await expect(readFile(join(project.path, '09_dispatch_board.md'), 'utf8')).resolves.toMatch(/执行对话不得直接修改/);
+    await expect(readFile(join(project.path, 'templates', 'worker_startup_instruction.md'), 'utf8')).resolves.toMatch(/outputs\/\{task_id\}-result.md/);
 
     const task = await manager.addTask(project.slug, '案例调研', '整理一个案例');
     expect(task).toMatchObject({ id: 'T-001', status: 'pending' });
@@ -116,6 +122,114 @@ describe('dispatch helper', () => {
     expect(replies).toHaveLength(1);
     expect(replies[0]).toMatch(/任务：T-001 输出保留/);
     expect(replies[0]).toMatch(/worker file result/);
+  });
+
+  it('records worker write boundary violations for supervisor review', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'feishu-dispatch-overreach-'));
+    const manager = new DispatchManager({
+      projectsDir: join(root, 'projects'),
+      codexBin: 'codex',
+      defaultCwd: root,
+    });
+    const project = await manager.createProject('overreach detection', '验证越权写入检查');
+    await manager.addTask(project.slug, '越权任务', '只应写输出文件');
+    const fakeOverreachCodex = join(root, 'fake-overreach-codex');
+    await writeFile(
+      fakeOverreachCodex,
+      [
+        '#!/bin/sh',
+        'mkdir -p outputs',
+        "printf 'worker file result\\n' > outputs/T-001-result.md",
+        "printf 'unauthorized edit\\n' > project.md",
+        'while [ "$1" != "" ]; do',
+        '  if [ "$1" = "--output-last-message" ]; then',
+        '    shift',
+        "    printf 'short chat summary\\n' > \"$1\"",
+        '  fi',
+        '  shift || exit 0',
+        'done',
+        'printf \'{"thread_id":"55555555-5555-5555-5555-555555555555"}\\n\'',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    await chmod(fakeOverreachCodex, 0o755);
+
+    const runner = new DispatchManager({
+      projectsDir: join(root, 'projects'),
+      codexBin: fakeOverreachCodex,
+      defaultCwd: root,
+    });
+    const result = await runner.runTask(project.slug, 'T-001', 'oc_worker');
+
+    expect(result.overreachFiles).toContain('project.md');
+  });
+
+  it('reviews complete results and writes supervisor review records', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'feishu-dispatch-auto-review-'));
+    const manager = new DispatchManager({
+      projectsDir: join(root, 'projects'),
+      codexBin: 'codex',
+      defaultCwd: root,
+    });
+    const project = await manager.createProject('auto review', '验证自动验收');
+    await manager.addTask(project.slug, '完整结果', '写完整结果');
+    await writeFile(
+      join(project.path, 'outputs', 'T-001-result.md'),
+      [
+        '## 核心结论',
+        '可继续。',
+        '',
+        '## 执行过程摘要',
+        '已完成。',
+        '',
+        '## 产出或发现',
+        '有可用材料。',
+        '',
+        '## 风险/阻塞',
+        '暂无。',
+        '',
+        '## 下一步建议',
+        '主控合并。',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    await manager.markTask(project.slug, 'T-001', 'reviewing');
+
+    const review = await manager.reviewTask(project.slug, 'T-001');
+
+    expect(review.task.status).toBe('accepted');
+    expect(review.reviewFile).toBe('reviews/T-001-review.md');
+    await expect(readFile(join(project.path, 'reviews', 'T-001-review.md'), 'utf8')).resolves.toMatch(/验收结论：accepted/);
+  });
+
+  it('turns incomplete review results into rework from /agent review', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'feishu-dispatch-review-command-'));
+    const manager = new DispatchManager({
+      projectsDir: join(root, 'projects'),
+      codexBin: 'codex',
+      defaultCwd: root,
+    });
+    const project = await manager.createProject('review command', '验证验收命令');
+    await manager.addTask(project.slug, '缺章节结果', '写不完整结果');
+    await writeFile(join(project.path, 'outputs', 'T-001-result.md'), '只有一句结果。\n', 'utf8');
+    await manager.markTask(project.slug, 'T-001', 'reviewing');
+
+    const replies: string[] = [];
+    await handleAgentCommand({
+      args: `review T-001 ${project.slug}`,
+      chatId: 'oc_supervisor',
+      cwd: root,
+      projectsDir: join(root, 'projects'),
+      reply: async (text) => {
+        replies.push(text);
+      },
+    });
+
+    expect(replies).toHaveLength(1);
+    expect(replies[0]).toMatch(/主控验收完成：T-001 -> rework/);
+    expect(replies[0]).toMatch(/缺少必要章节/);
   });
 
   it('preserves task board updates when multiple workers finish concurrently', async () => {

@@ -160,6 +160,41 @@ Feishu/Lark chat
 | <code>/account</code> | 查看或更换 bridge 使用的飞书 / Lark 应用 |
 | <code>/help</code> | 查看帮助卡片 |
 
+### 多对话调度
+
+`/agent` 用于复现“主控派活、分项执行、主控验收”的 Codex 多线程协作流程。主控一般在私聊里新建项目和分派任务，执行对话可以是另一个私聊、群聊或话题。
+
+最小流程：
+
+```text
+/agent new 项目名
+项目目标
+
+/agent add 任务标题
+任务说明
+
+/agent worker east 项目slug
+
+/agent assign T-001 east 项目slug
+
+/agent run T-001 项目slug
+
+/agent result T-001 项目slug
+
+/agent review T-001 项目slug
+```
+
+项目目录默认在 `~/.openclaw/workspace/projects/<project-slug>/`，核心文件：
+
+- `07_上下文窗口治理机制.md`：长期规则，定义主控对话、执行对话、写入边界和越权检查。
+- `09_dispatch_board.md`：主控可读看板，由 `task_board.json` 自动同步生成，执行对话不得直接修改。
+- `templates/worker_startup_instruction.md`：执行对话启动指令模板。
+- `worker_state/T-xxx.json`：执行对话自己的状态文件。
+- `outputs/T-xxx-result.md`：执行对话结果文件。
+- `reviews/T-xxx-review.md`：主控验收记录。
+
+执行对话只允许写自己的 `outputs/<task-id>-result.md` 和 `worker_state/<task-id>.json`。如果它修改 `project.md`、`task_board.json`、`09_dispatch_board.md`、治理机制文件或其它任务文件，`/agent review` 会把任务打回 `rework`。
+
 ## 用户 OAuth
 
 基础聊天不需要用户 OAuth。只有当 Codex 需要访问“我的聊天记录、日历、云文档”等个人资源时，才需要登录 `lark-cli` 用户身份：
