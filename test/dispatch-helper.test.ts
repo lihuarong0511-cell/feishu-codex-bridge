@@ -133,7 +133,7 @@ describe('dispatch helper', () => {
     expect(replies[0]).toMatch(/worker file result/);
   });
 
-  it('records worker write boundary violations for supervisor review', async () => {
+  it('runs workers in an isolated workspace and only imports the task result', async () => {
     const root = await mkdtemp(join(tmpdir(), 'feishu-dispatch-overreach-'));
     const manager = new DispatchManager({
       projectsDir: join(root, 'projects'),
@@ -171,7 +171,10 @@ describe('dispatch helper', () => {
     });
     const result = await runner.runTask(project.slug, 'T-001', 'oc_worker');
 
-    expect(result.overreachFiles).toContain('project.md');
+    expect(result.overreachFiles ?? []).not.toContain('project.md');
+    await expect(readFile(join(project.path, 'project.md'), 'utf8')).resolves.not.toMatch(/unauthorized edit/);
+    await expect(readFile(join(project.path, 'outputs', 'T-001-result.md'), 'utf8')).resolves.toBe('worker file result\n');
+    await expect(readFile(join(project.path, 'worker_runs', 'T-001', 'project.md'), 'utf8')).resolves.toMatch(/unauthorized edit/);
   });
 
   it('reviews complete results and writes supervisor review records', async () => {
@@ -326,6 +329,152 @@ describe('dispatch helper', () => {
 
     expect(review.task.status).toBe('rework');
     expect(review.findings.join('\n')).toMatch(/信息来源/);
+  });
+
+  it('returns single-source research outputs without pending-verification labels to rework', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'feishu-dispatch-single-source-'));
+    const manager = new DispatchManager({
+      projectsDir: join(root, 'projects'),
+      codexBin: 'codex',
+      defaultCwd: root,
+    });
+    const project = await manager.createProject('【房地产】市场调研单源', '核心目标：验证单源标注');
+    await manager.addTask(project.slug, '政策调研', '整理政策数据');
+    await writeFile(
+      join(project.path, 'outputs', 'T-001-result.md'),
+      [
+        '## 核心结论',
+        '市场有变化。',
+        '',
+        '## 执行过程摘要',
+        '已整理。',
+        '',
+        '## 产出或发现',
+        '发现一个趋势。',
+        '',
+        '## 风险/阻塞',
+        '暂无。',
+        '',
+        '## 下一步建议',
+        '继续跟进。',
+        '',
+        '## 信息来源清单',
+        '- 国家统计局，https://www.stats.gov.cn/，检索时间：2026-06-03',
+        '',
+        '## 自动复核',
+        '- 事实准确性：通过。',
+        '- 逻辑完整性：通过。',
+        '- 执行可行性：通过。',
+        '- 表达质量：通过。',
+        '- 遗漏风险：通过。',
+        '- 方案影响：通过。',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    await manager.markTask(project.slug, 'T-001', 'reviewing');
+
+    const review = await manager.reviewTask(project.slug, 'T-001');
+
+    expect(review.task.status).toBe('rework');
+    expect(review.findings.join('\n')).toMatch(/单一来源/);
+  });
+
+  it('accepts single-source research outputs that explicitly mark the source as pending verification', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'feishu-dispatch-single-source-pending-'));
+    const manager = new DispatchManager({
+      projectsDir: join(root, 'projects'),
+      codexBin: 'codex',
+      defaultCwd: root,
+    });
+    const project = await manager.createProject('【房地产】市场调研单源待验证', '核心目标：验证单源标注');
+    await manager.addTask(project.slug, '政策调研', '整理政策数据');
+    await writeFile(
+      join(project.path, 'outputs', 'T-001-result.md'),
+      [
+        '## 核心结论',
+        '市场有变化。',
+        '',
+        '## 执行过程摘要',
+        '已整理。',
+        '',
+        '## 产出或发现',
+        '发现一个趋势。',
+        '',
+        '## 风险/阻塞',
+        '暂无。',
+        '',
+        '## 下一步建议',
+        '继续跟进。',
+        '',
+        '## 信息来源清单',
+        '- ⚠️ 待验证：国家统计局，https://www.stats.gov.cn/，检索时间：2026-06-03',
+        '',
+        '## 自动复核',
+        '- 事实准确性：通过。',
+        '- 逻辑完整性：通过。',
+        '- 执行可行性：通过。',
+        '- 表达质量：通过。',
+        '- 遗漏风险：通过。',
+        '- 方案影响：通过。',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    await manager.markTask(project.slug, 'T-001', 'reviewing');
+
+    const review = await manager.reviewTask(project.slug, 'T-001');
+
+    expect(review.task.status).toBe('accepted');
+  });
+
+  it('accepts research outputs with at least two source entries', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'feishu-dispatch-two-sources-'));
+    const manager = new DispatchManager({
+      projectsDir: join(root, 'projects'),
+      codexBin: 'codex',
+      defaultCwd: root,
+    });
+    const project = await manager.createProject('【房地产】市场调研双源', '核心目标：验证双源');
+    await manager.addTask(project.slug, '政策调研', '整理政策数据');
+    await writeFile(
+      join(project.path, 'outputs', 'T-001-result.md'),
+      [
+        '## 核心结论',
+        '市场有变化。',
+        '',
+        '## 执行过程摘要',
+        '已整理。',
+        '',
+        '## 产出或发现',
+        '发现一个趋势。',
+        '',
+        '## 风险/阻塞',
+        '暂无。',
+        '',
+        '## 下一步建议',
+        '继续跟进。',
+        '',
+        '## 信息来源清单',
+        '- 国家统计局，https://www.stats.gov.cn/，检索时间：2026-06-03',
+        '- 自然资源部，https://www.mnr.gov.cn/，发布时间：2026-06-01',
+        '',
+        '## 自动复核',
+        '- 事实准确性：通过。',
+        '- 逻辑完整性：通过。',
+        '- 执行可行性：通过。',
+        '- 表达质量：通过。',
+        '- 遗漏风险：通过。',
+        '- 方案影响：通过。',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    await manager.markTask(project.slug, 'T-001', 'reviewing');
+
+    const review = await manager.reviewTask(project.slug, 'T-001');
+
+    expect(review.task.status).toBe('accepted');
   });
 
   it('appends accepted supervisor reviews into handoff records', async () => {

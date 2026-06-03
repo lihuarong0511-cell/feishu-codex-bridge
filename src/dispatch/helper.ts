@@ -282,6 +282,7 @@ export class DispatchManager {
     await mkdir(join(path, 'plans'));
     await mkdir(join(path, 'reviews'));
     await mkdir(join(path, 'worker_state'));
+    await mkdir(join(path, 'worker_runs'));
     await mkdir(join(path, 'templates'));
     const now = nowText();
     const board: DispatchBoard = {
@@ -327,7 +328,7 @@ export class DispatchManager {
         '',
         '- 主控对话负责拆解、分派、复核和合并。',
         '- 执行对话只处理被分配的单项任务。',
-        '- 执行对话只写自己的 outputs/ 与 worker_state/ 文件。',
+        '- 执行对话在 worker_runs/<task-id>/ 隔离目录内运行，只提交自己的 outputs/ 与 worker_state/ 文件。',
         '- task_board.json 是唯一可信任务状态源。',
         '- 09_dispatch_board.md 是主控可读看板，由系统从 task_board.json 同步生成。',
         '- 执行结果必须写入 outputs/ 后再进入复核。',
@@ -539,25 +540,27 @@ export class DispatchManager {
     });
     await appendProgress(projectPath, task.id, 'running', '开始执行。');
     await writeWorkerState(projectPath, task, 'running', '主控已派发，执行对话开始处理。');
+    const workerRunPath = join(projectPath, 'worker_runs', task.id);
+    await prepareWorkerRun(projectPath, workerRunPath, board, task);
     const beforeSnapshot = await fileSnapshot(projectPath);
 
-    const lastMessage = join(projectPath, 'progress', `${task.id}-last-message.md`);
+    const lastMessage = join(workerRunPath, 'progress', `${task.id}-last-message.md`);
     const args = [
       '--ask-for-approval',
       'never',
       'exec',
       '--json',
       '--cd',
-      projectPath,
+      workerRunPath,
       '--skip-git-repo-check',
       '--sandbox',
       'workspace-write',
       '--output-last-message',
       lastMessage,
-      workerPrompt(projectPath, board, task, chatId),
+      workerPrompt(projectPath, workerRunPath, board, task, chatId),
     ];
     const result = await runProcess(this.codexBin, args, {
-      cwd: projectPath,
+      cwd: workerRunPath,
       timeoutMs: this.timeoutMs,
     });
     if (result.code !== 0) {
@@ -569,26 +572,32 @@ export class DispatchManager {
     const sessionId = extractSessionId(result.stdout);
     const body = await readFile(lastMessage, 'utf8').catch(() => result.stdout);
     const outputPath = join(projectPath, 'outputs', `${task.id}-result.md`);
+    const workerOutputPath = join(workerRunPath, 'outputs', `${task.id}-result.md`);
     const overreachFiles = await detectWorkerOverreach(projectPath, task.id, beforeSnapshot);
     const existingOutput = await readFile(outputPath, 'utf8').catch(() => '');
     if (!existingOutput.trim()) {
-      await writeFile(
-        outputPath,
-        [
-          `# ${task.id} ${task.title}`,
-          '',
-          `项目：${board.project.name}`,
-          '状态：reviewing',
-          `Codex session：${sessionId || '未捕获'}`,
-          `更新时间：${nowText()}`,
-          '',
-          '## 执行结果',
-          '',
-          body.trim() || '执行完成，但没有生成正文。',
-          '',
-        ].join('\n'),
-        'utf8',
-      );
+      const workerOutput = await readFile(workerOutputPath, 'utf8').catch(() => '');
+      if (workerOutput.trim()) {
+        await writeFile(outputPath, workerOutput, 'utf8');
+      } else {
+        await writeFile(
+          outputPath,
+          [
+            `# ${task.id} ${task.title}`,
+            '',
+            `项目：${board.project.name}`,
+            '状态：reviewing',
+            `Codex session：${sessionId || '未捕获'}`,
+            `更新时间：${nowText()}`,
+            '',
+            '## 执行结果',
+            '',
+            body.trim() || '执行完成，但没有生成正文。',
+            '',
+          ].join('\n'),
+          'utf8',
+        );
+      }
     }
 
     const updated = await updateBoard(projectPath, (board) => {
@@ -694,9 +703,8 @@ export class DispatchManager {
     if (missingReviewDimensions.length) {
       findings.push(`自动复核缺少质量维度：${missingReviewDimensions.join('、')}`);
     }
-    if (requiresSources(board, task) && !hasSourceList(body)) {
-      findings.push('调研类任务缺少信息来源清单：需包含来源机构、链接和时间；单一来源信息需标注“待验证”。');
-    }
+    const sourceAssessment = requiresSources(board, task) ? assessSources(body) : { ok: true, reason: '' };
+    if (!sourceAssessment.ok) findings.push(sourceAssessment.reason);
     const overreachFiles = (task.overreachFiles ?? []).filter(Boolean);
     if (overreachFiles.length) findings.push(`发现越权写入风险：${overreachFiles.join('、')}`);
     const statusText = findings.length ? 'rework' : 'accepted';
@@ -716,7 +724,7 @@ export class DispatchManager {
         `- 结果文件：${body ? '通过' : '不通过'}`,
         `- 必要章节：${missingSections.length ? '不通过' : '通过'}`,
         `- 自动复核维度：${missingReviewDimensions.length ? '不通过' : '通过'}`,
-        `- 调研来源：${requiresSources(board, task) ? (hasSourceList(body) ? '通过' : '不通过') : '不适用'}`,
+        `- 调研来源：${requiresSources(board, task) ? (sourceAssessment.ok ? '通过' : '不通过') : '不适用'}`,
         `- 越权写入风险：${overreachFiles.length ? '不通过' : '通过'}`,
         '- 队列状态：已由主控更新到验收结论。',
         '',
@@ -1054,17 +1062,27 @@ function assignmentMessage(projectPath: string, board: DispatchBoard, task: Disp
   return `你收到一个执行任务。\n项目：${board.project.name}\n项目 slug：${board.project.slug}\n项目目录：${projectPath}\n任务：${task.id} ${task.title}\n输出文件：${task.output || `outputs/${task.id}-result.md`}\n\n任务说明：\n${task.instructions}\n\n执行方式：\n/agent run ${task.id} ${board.project.slug}\n\n完成后主控会用：\n/agent review ${task.id} ${board.project.slug}`;
 }
 
-function workerPrompt(projectPath: string, board: DispatchBoard, task: DispatchTask, chatId: string): string {
+function workerPrompt(
+  projectPath: string,
+  workerRunPath: string,
+  board: DispatchBoard,
+  task: DispatchTask,
+  chatId: string,
+): string {
   return `你是 feishu-codex-bridge 多对话调度系统中的执行对话，不是主控。
 只完成当前任务，不要改动其它任务，不要删除用户或其它执行对话的文件。
 主控才可以更新 task_board.json、09_dispatch_board.md、reviews/、project.md 和治理机制文件。
-你只允许写入：outputs/${task.id}-result.md、worker_state/${task.id}.json。
+你当前运行在隔离工作区：${workerRunPath}
+项目根目录仅作为只读参考：${projectPath}
+你只允许在当前隔离工作区内写入：outputs/${task.id}-result.md、worker_state/${task.id}.json。
+不要直接写入项目根目录；主控会在执行结束后只导入你的 outputs/${task.id}-result.md。
 完成后必须把结果写入指定输出文件，并在最终回复里给出简短完成摘要。
 输出要结论先行，不写空话；材料不足时明确写“无法判断”或“需要补充的信息”。
 
 飞书 chat_id：${chatId || 'unknown'}
 项目：${board.project.name}
-项目目录：${projectPath}
+项目根目录：${projectPath}
+当前隔离工作区：${workerRunPath}
 任务ID：${task.id}
 任务标题：${task.title}
 任务说明：
@@ -1245,6 +1263,52 @@ async function writeWorkerState(projectPath: string, task: DispatchTask, statusT
   );
 }
 
+async function prepareWorkerRun(
+  projectPath: string,
+  workerRunPath: string,
+  board: DispatchBoard,
+  task: DispatchTask,
+): Promise<void> {
+  await mkdir(workerRunPath, { recursive: true });
+  await mkdir(join(workerRunPath, 'outputs'), { recursive: true });
+  await mkdir(join(workerRunPath, 'worker_state'), { recursive: true });
+  await mkdir(join(workerRunPath, 'progress'), { recursive: true });
+  const projectBrief = await readFile(join(projectPath, 'project.md'), 'utf8').catch(() => '');
+  const taskBrief = await readFile(join(projectPath, 'tasks', `${task.id}.md`), 'utf8').catch(() => '');
+  await writeFile(
+    join(workerRunPath, 'README.md'),
+    [
+      `# ${task.id} isolated worker run`,
+      '',
+      `项目：${board.project.name}`,
+      `项目根目录（只读参考）：${projectPath}`,
+      `隔离工作区：${workerRunPath}`,
+      '',
+      '## 写入边界',
+      '',
+      `- 只写当前目录下的 outputs/${task.id}-result.md。`,
+      `- 可写当前目录下的 worker_state/${task.id}.json。`,
+      '- 不直接写项目根目录；主控只会导入隔离目录里的结果文件。',
+      '',
+    ].join('\n'),
+    'utf8',
+  );
+  await writeFile(
+    join(workerRunPath, 'project.md'),
+    projectBrief.trim()
+      ? `${projectBrief.trimEnd()}\n`
+      : [`# ${board.project.name}`, '', `目标：${board.project.goal || '未填写'}`, ''].join('\n'),
+    'utf8',
+  );
+  await writeFile(
+    join(workerRunPath, 'task.md'),
+    taskBrief.trim()
+      ? `${taskBrief.trimEnd()}\n`
+      : [`# ${task.id} ${task.title}`, '', task.instructions, ''].join('\n'),
+    'utf8',
+  );
+}
+
 async function fileSnapshot(projectPath: string): Promise<Record<string, string>> {
   const snapshot: Record<string, string> = {};
   async function walk(dir: string): Promise<void> {
@@ -1266,13 +1330,9 @@ async function fileSnapshot(projectPath: string): Promise<Record<string, string>
 
 async function detectWorkerOverreach(projectPath: string, taskId: string, before: Record<string, string>): Promise<string[]> {
   const after = await fileSnapshot(projectPath);
-  const allowed = new Set([
-    `outputs/${taskId}-result.md`,
-    `worker_state/${taskId}.json`,
-    `progress/${taskId}-last-message.md`,
-  ]);
+  const allowedPrefix = `worker_runs/${taskId}/`;
   return Object.entries(after)
-    .filter(([rel, digest]) => before[rel] !== digest && !allowed.has(rel))
+    .filter(([rel, digest]) => before[rel] !== digest && !rel.startsWith(allowedPrefix))
     .map(([rel]) => rel)
     .sort();
 }
@@ -1346,10 +1406,51 @@ function requiresSources(board: DispatchBoard, task: DispatchTask): boolean {
   return RESEARCH_KEYWORDS.some((keyword) => text.includes(keyword));
 }
 
-function hasSourceList(body: string): boolean {
-  if (!/(信息来源|来源清单|参考来源|资料来源|Sources?)/i.test(body)) return false;
-  if (!/(https?:\/\/|www\.|机构|来源|时间|日期|发布|检索|访问)/i.test(body)) return false;
-  return true;
+function assessSources(body: string): { ok: boolean; reason: string } {
+  const sourceSection = extractSourceSection(body);
+  if (!sourceSection.trim()) {
+    return {
+      ok: false,
+      reason: '调研类任务缺少信息来源清单：需包含来源机构、链接和时间；单一来源信息需标注“待验证”。',
+    };
+  }
+  const sourceCount = countSourceEntries(sourceSection);
+  if (sourceCount === 0) {
+    return {
+      ok: false,
+      reason: '调研类任务的信息来源清单不完整：至少需要可识别的来源链接和发布时间/检索时间。',
+    };
+  }
+  if (sourceCount === 1 && !/(待验证|仅单一来源|单一来源|⚠️)/.test(sourceSection)) {
+    return {
+      ok: false,
+      reason: '调研类任务只有单一来源且未标注“待验证”：需补充第二来源，或明确标注该信息待验证。',
+    };
+  }
+  return { ok: true, reason: '' };
+}
+
+function extractSourceSection(body: string): string {
+  const lines = String(body || '').split(/\r?\n/);
+  const start = lines.findIndex((line) => /(信息来源|来源清单|参考来源|资料来源|Sources?)/i.test(line));
+  if (start === -1) return '';
+  const section = [lines[start] ?? ''];
+  for (const line of lines.slice(start + 1)) {
+    if (/^#{1,3}\s+\S/.test(line) && !/(信息来源|来源清单|参考来源|资料来源|Sources?)/i.test(line)) break;
+    section.push(line);
+  }
+  return section.join('\n');
+}
+
+function countSourceEntries(sourceSection: string): number {
+  const lines = sourceSection.split(/\r?\n/);
+  let count = 0;
+  for (const line of lines) {
+    if (!/(https?:\/\/|www\.)/i.test(line)) continue;
+    if (!/(时间|日期|发布|检索|访问|\d{4}[-年/])/i.test(line)) continue;
+    count += 1;
+  }
+  return count;
 }
 
 function nextTaskId(board: DispatchBoard): string {
