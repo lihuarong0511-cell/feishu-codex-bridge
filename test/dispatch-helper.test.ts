@@ -42,6 +42,7 @@ describe('dispatch helper', () => {
     await stat(join(project.path, 'tasks'));
     await stat(join(project.path, 'progress'));
     await stat(join(project.path, 'outputs'));
+    await stat(join(project.path, 'plans'));
     await stat(join(project.path, 'reviews'));
     await stat(join(project.path, 'worker_state'));
     await stat(join(project.path, 'templates', 'worker_startup_instruction.md'));
@@ -258,6 +259,121 @@ describe('dispatch helper', () => {
     expect(review.task.status).toBe('rework');
     expect(review.findings.join('\n')).toMatch(/自动复核/);
     expect(review.findings.join('\n')).toMatch(/事实准确性/);
+  });
+
+  it('requires explicit plan approval before running tasks marked as plan-first', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'feishu-dispatch-plan-gate-'));
+    const manager = new DispatchManager({
+      projectsDir: join(root, 'projects'),
+      codexBin: await fakeCodex(join(root, 'fake-codex'), 'should not run'),
+      defaultCwd: root,
+    });
+    const project = await manager.createProject('plan gate', '验证计划确认');
+    await manager.addTask(project.slug, '复杂方案', '需要计划确认：拆解一个多阶段企业策划方案');
+
+    await expect(manager.runTask(project.slug, 'T-001', 'oc_worker')).rejects.toThrow(/需要先提交计划并由主控批准/);
+
+    const plan = await manager.planTask(project.slug, 'T-001');
+    expect(plan.task.status).toBe('planned');
+    await expect(readFile(join(project.path, 'plans', 'T-001-plan.md'), 'utf8')).resolves.toMatch(/## 执行步骤/);
+
+    const approved = await manager.approvePlan(project.slug, 'T-001');
+    expect(approved.status).toBe('pending');
+    expect(approved.planApproved).toBe(true);
+  });
+
+  it('returns research outputs without source lists to rework', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'feishu-dispatch-source-review-'));
+    const manager = new DispatchManager({
+      projectsDir: join(root, 'projects'),
+      codexBin: 'codex',
+      defaultCwd: root,
+    });
+    const project = await manager.createProject('【房地产】市场调研', '核心目标：验证来源校验');
+    await manager.addTask(project.slug, '市场调研', '整理政策和市场数据');
+    await writeFile(
+      join(project.path, 'outputs', 'T-001-result.md'),
+      [
+        '## 核心结论',
+        '市场有变化。',
+        '',
+        '## 执行过程摘要',
+        '已整理。',
+        '',
+        '## 产出或发现',
+        '发现一个趋势。',
+        '',
+        '## 风险/阻塞',
+        '暂无。',
+        '',
+        '## 下一步建议',
+        '继续跟进。',
+        '',
+        '## 自动复核',
+        '- 事实准确性：通过。',
+        '- 逻辑完整性：通过。',
+        '- 执行可行性：通过。',
+        '- 表达质量：通过。',
+        '- 遗漏风险：通过。',
+        '- 方案影响：通过。',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    await manager.markTask(project.slug, 'T-001', 'reviewing');
+
+    const review = await manager.reviewTask(project.slug, 'T-001');
+
+    expect(review.task.status).toBe('rework');
+    expect(review.findings.join('\n')).toMatch(/信息来源/);
+  });
+
+  it('appends accepted supervisor reviews into handoff records', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'feishu-dispatch-handoff-'));
+    const manager = new DispatchManager({
+      projectsDir: join(root, 'projects'),
+      codexBin: 'codex',
+      defaultCwd: root,
+    });
+    const project = await manager.createProject('handoff review', '验证复核沉淀');
+    await manager.addTask(project.slug, '可沉淀结果', '写完整结果');
+    await writeFile(
+      join(project.path, 'outputs', 'T-001-result.md'),
+      [
+        '## 核心结论',
+        '可以归档。',
+        '',
+        '## 执行过程摘要',
+        '已完成。',
+        '',
+        '## 产出或发现',
+        '产出完整。',
+        '',
+        '## 风险/阻塞',
+        '暂无。',
+        '',
+        '## 下一步建议',
+        '合并。',
+        '',
+        '## 自动复核',
+        '- 事实准确性：通过。',
+        '- 逻辑完整性：通过。',
+        '- 执行可行性：通过。',
+        '- 表达质量：通过。',
+        '- 遗漏风险：通过。',
+        '- 方案影响：通过。',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    await manager.markTask(project.slug, 'T-001', 'reviewing');
+
+    await manager.reviewTask(project.slug, 'T-001');
+
+    const handoff = await readFile(join(project.path, 'handoff.md'), 'utf8');
+    expect(handoff).toMatch(/T-001 可沉淀结果/);
+    expect(handoff).toMatch(/accepted/);
+    expect(handoff).toMatch(/reviews\/T-001-review.md/);
   });
 
   it('turns incomplete review results into rework from /agent review', async () => {
@@ -545,6 +661,34 @@ describe('dispatch helper', () => {
     expect(callbacks).not.toContainEqual({ cmd: 'agent.review', arg: `T-002 ${project.slug}` });
     expect(callbacks).not.toContainEqual({ cmd: 'agent.mark', arg: `T-001 rework ${project.slug}` });
     expect(callbacks).not.toContainEqual({ cmd: 'agent.mark', arg: `T-002 rework ${project.slug}` });
+  });
+
+  it('renders plan approval actions without premature run buttons for planned tasks', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'feishu-dispatch-planned-card-'));
+    const manager = new DispatchManager({
+      projectsDir: join(root, 'projects'),
+      codexBin: 'codex',
+      defaultCwd: root,
+    });
+    const project = await manager.createProject('planned card', '验证计划按钮');
+    await manager.addTask(project.slug, '复杂任务', '需要计划确认：先写计划');
+    await manager.planTask(project.slug, 'T-001');
+
+    const cards: Array<{ card: object; fallback: string }> = [];
+    await handleAgentCommand({
+      args: `status ${project.slug}`,
+      chatId: 'oc_supervisor',
+      cwd: root,
+      projectsDir: join(root, 'projects'),
+      reply: async () => undefined,
+      replyCard: async (card, fallback) => {
+        cards.push({ card, fallback });
+      },
+    });
+
+    const callbacks = callbackValues(cards[0]?.card);
+    expect(callbacks).toContainEqual({ cmd: 'agent.approve', arg: `T-001 ${project.slug}` });
+    expect(callbacks).not.toContainEqual({ cmd: 'agent.run', arg: `T-001 ${project.slug}` });
   });
 
   it('rejects stale single-task run clicks before sending a launch acknowledgement', async () => {

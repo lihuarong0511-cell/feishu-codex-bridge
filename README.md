@@ -177,6 +177,10 @@ task instructions
 
 /agent assign T-001 east project-slug
 
+/agent plan T-001 project-slug
+
+/agent approve T-001 project-slug
+
 /agent run T-001 project-slug
 
 /agent result T-001 project-slug
@@ -200,13 +204,17 @@ Projects are stored under `~/.openclaw/workspace/projects/<project-slug>/` by de
 - `07_上下文窗口治理机制.md`: long-term rules for supervisor, worker, write boundaries, and overreach checks.
 - `09_dispatch_board.md`: human-readable board generated from `task_board.json`; workers must not edit it directly.
 - `templates/worker_startup_instruction.md`: worker startup instruction template.
+- `plans/T-xxx-plan.md`: execution plan for complex tasks; it must be approved with `/agent approve` before execution.
 - `worker_state/T-xxx.json`: per-worker state file.
 - `outputs/T-xxx-result.md`: worker result file.
 - `reviews/T-xxx-review.md`: supervisor review record, including result sections, self-review dimensions, and overreach checks.
+- `handoff.md`: appended supervisor review handoff records for merge, recap, and later continuation.
 
 Workers may only write their own `outputs/<task-id>-result.md` and `worker_state/<task-id>.json`. If a worker modifies `project.md`, `task_board.json`, `09_dispatch_board.md`, governance files, or another task file, `/agent review` marks the task as `rework`.
 
 `/agent review` requires these result sections: `核心结论`, `执行过程摘要`, `产出或发现`, `风险/阻塞`, `下一步建议`, and `自动复核`. The self-review must cover `事实准确性`, `逻辑完整性`, `执行可行性`, `表达质量`, `遗漏风险`, and `方案影响`. Review cards make “自动验收” the primary action so a task is not accepted before the supervisor review runs.
+
+Tasks marked with terms such as `复杂`, `需要计划确认`, `多阶段`, `调研报告`, or `实施方案` require `/agent plan T-xxx` followed by `/agent approve T-xxx` before they can run. Research, policy, market, data, case-study, competitor, and real-estate tasks require an information-source list; missing source organization, link, or timestamp makes `/agent review` return `rework`.
 
 ## User OAuth
 

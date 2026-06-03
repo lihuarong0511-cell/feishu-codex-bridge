@@ -12,6 +12,7 @@ const TASK_STATUSES = new Set([
   'reviewing',
   'accepted',
   'rework',
+  'planned',
   'done',
   'failed',
 ]);
@@ -25,6 +26,8 @@ const boardLocks = new Map<string, Promise<void>>();
 const BUSINESS_LINES = ['博物馆', '咖啡清吧', '餐饮', '房地产', '占星', '企业策划'] as const;
 const QUALITY_REVIEW_DIMENSIONS = ['事实准确性', '逻辑完整性', '执行可行性', '表达质量', '遗漏风险', '方案影响'];
 const RESULT_REQUIRED_SECTIONS = ['核心结论', '执行过程摘要', '产出或发现', '风险/阻塞', '下一步建议', '自动复核'];
+const RESEARCH_KEYWORDS = ['调研', '研究', '政策', '市场', '数据', '案例', '竞品', '房地产', '来源'];
+const PLAN_FIRST_KEYWORDS = ['需要计划确认', '复杂', '多阶段', '策划方案', '调研报告', '实施方案', '执行方案'];
 
 interface ProjectBrief {
   businessLine: string;
@@ -192,6 +195,8 @@ export interface DispatchTask {
   overreachFiles?: string[];
   review?: string;
   reviewFindings?: string[];
+  plan?: string;
+  planApproved?: boolean;
 }
 
 interface DispatchBoard {
@@ -274,6 +279,7 @@ export class DispatchManager {
     await mkdir(join(path, 'tasks'));
     await mkdir(join(path, 'progress'));
     await mkdir(join(path, 'outputs'));
+    await mkdir(join(path, 'plans'));
     await mkdir(join(path, 'reviews'));
     await mkdir(join(path, 'worker_state'));
     await mkdir(join(path, 'templates'));
@@ -325,6 +331,7 @@ export class DispatchManager {
         '- task_board.json 是唯一可信任务状态源。',
         '- 09_dispatch_board.md 是主控可读看板，由系统从 task_board.json 同步生成。',
         '- 执行结果必须写入 outputs/ 后再进入复核。',
+        '- 复杂任务先提交 plans/<task-id>-plan.md，经主控批准后再执行。',
         '- 主控验收必须检查结果完整性、索引状态、队列状态、越权写入风险和质量复核维度。',
         '- 材料不足必须写“无法判断”或“需要补充的信息”，不得自行脑补。',
         '',
@@ -409,6 +416,7 @@ export class DispatchManager {
         '',
         `- 只允许写入 outputs/${task.id}-result.md。`,
         `- 只允许写入 worker_state/${task.id}.json。`,
+        `- 如任务标注需要计划确认，先由主控生成并批准 plans/${task.id}-plan.md。`,
         '- 不允许修改 task_board.json、09_dispatch_board.md、project.md、治理机制文件或其它任务文件。',
         '',
         '## 验收标准',
@@ -439,10 +447,88 @@ export class DispatchManager {
     return { ...findTask(board, taskId) };
   }
 
+  async planTask(projectSlug: string, taskId: string): Promise<{ task: DispatchTask; planFile: string }> {
+    const projectPath = await this.projectPath(projectSlug);
+    const { board, task } = await updateBoard(projectPath, (board) => {
+      const task = findTask(board, taskId);
+      if (task.status === 'running' || task.status === 'reviewing' || task.status === 'accepted' || task.status === 'done') {
+        throw new DispatchError(`${task.id} 当前状态是 ${task.status}，不能提交执行计划。`);
+      }
+      task.status = 'planned';
+      task.plan = `plans/${task.id}-plan.md`;
+      task.planApproved = false;
+      task.updatedAt = nowText();
+      board.project.updatedAt = task.updatedAt;
+      return { board, task: { ...task } };
+    });
+    const planFile = task.plan || `plans/${task.id}-plan.md`;
+    await writeFile(
+      join(projectPath, planFile),
+      [
+        `# ${task.id} ${task.title} 执行计划`,
+        '',
+        `项目：${board.project.name}`,
+        `状态：planned`,
+        `更新时间：${nowText()}`,
+        '',
+        '## 任务目标',
+        '',
+        task.instructions,
+        '',
+        '## 执行步骤',
+        '',
+        '1. 明确目标、边界、交付物和验收标准。',
+        '2. 收集必要材料；调研类任务必须记录来源、机构、链接和时间。',
+        '3. 按任务要求产出结果文件，结论先行，材料不足写“无法判断”或“需要补充的信息”。',
+        '4. 按事实准确性、逻辑完整性、执行可行性、表达质量、遗漏风险、方案影响做自动复核。',
+        '5. 提交到 outputs/ 后等待主控 `/agent review`。',
+        '',
+        '## 资源与前提',
+        '',
+        '- 使用项目已有材料和主控提供的任务说明。',
+        '- 不修改主控文件、其它任务文件或用户无关文件。',
+        '',
+        '## 风险预判',
+        '',
+        '- 材料不足：在结果中明确列为阻塞，不自行脑补。',
+        '- 来源不足：调研类任务必须标注待验证。',
+        '',
+        '## 主控确认',
+        '',
+        `- 批准命令：/agent approve ${task.id} ${board.project.slug}`,
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    await appendProgress(projectPath, task.id, 'planned', `已生成执行计划：${planFile}`);
+    return { task, planFile };
+  }
+
+  async approvePlan(projectSlug: string, taskId: string): Promise<DispatchTask> {
+    const projectPath = await this.projectPath(projectSlug);
+    const task = await updateBoard(projectPath, (board) => {
+      const task = findTask(board, taskId);
+      if (!task.plan) throw new DispatchError(`${task.id} 还没有执行计划。先用 /agent plan ${task.id} ${board.project.slug}`);
+      if (task.status !== 'planned') {
+        throw new DispatchError(`${task.id} 当前状态是 ${task.status}，不能批准计划。`);
+      }
+      task.status = task.assignedTo ? 'assigned' : 'pending';
+      task.planApproved = true;
+      task.updatedAt = nowText();
+      board.project.updatedAt = task.updatedAt;
+      return { ...task };
+    });
+    await appendProgress(projectPath, task.id, 'approved', '主控已批准执行计划。');
+    return task;
+  }
+
   async runTask(projectSlug: string, taskId: string, chatId = ''): Promise<DispatchTask> {
     const projectPath = await this.projectPath(projectSlug);
     const { board, task } = await updateBoard(projectPath, (board) => {
       const task = findTask(board, taskId);
+      if (requiresPlan(task) && !task.planApproved) {
+        throw new DispatchError(`${task.id} 需要先提交计划并由主控批准。用法：/agent plan ${task.id} ${board.project.slug}，再 /agent approve ${task.id} ${board.project.slug}`);
+      }
       if (!isRunnableTask(task)) {
         throw new DispatchError(`${task.id} 当前状态是 ${task.status}，不能直接执行。`);
       }
@@ -608,6 +694,9 @@ export class DispatchManager {
     if (missingReviewDimensions.length) {
       findings.push(`自动复核缺少质量维度：${missingReviewDimensions.join('、')}`);
     }
+    if (requiresSources(board, task) && !hasSourceList(body)) {
+      findings.push('调研类任务缺少信息来源清单：需包含来源机构、链接和时间；单一来源信息需标注“待验证”。');
+    }
     const overreachFiles = (task.overreachFiles ?? []).filter(Boolean);
     if (overreachFiles.length) findings.push(`发现越权写入风险：${overreachFiles.join('、')}`);
     const statusText = findings.length ? 'rework' : 'accepted';
@@ -627,6 +716,7 @@ export class DispatchManager {
         `- 结果文件：${body ? '通过' : '不通过'}`,
         `- 必要章节：${missingSections.length ? '不通过' : '通过'}`,
         `- 自动复核维度：${missingReviewDimensions.length ? '不通过' : '通过'}`,
+        `- 调研来源：${requiresSources(board, task) ? (hasSourceList(body) ? '通过' : '不通过') : '不适用'}`,
         `- 越权写入风险：${overreachFiles.length ? '不通过' : '通过'}`,
         '- 队列状态：已由主控更新到验收结论。',
         '',
@@ -652,6 +742,7 @@ export class DispatchManager {
     });
     await writeWorkerState(projectPath, updated, statusText, '主控验收完成。');
     await appendProgress(projectPath, task.id, statusText, `主控自动验收：${statusText === 'accepted' ? '通过。' : '需返工。'}`);
+    await appendHandoff(projectPath, updated, statusText, reviewFile, findings);
     return { task: updated, status: statusText, findings, reviewFile };
   }
 
@@ -816,6 +907,26 @@ export async function handleAgentCommand(opts: HandleAgentCommandOptions): Promi
       void runAndNotify(manager, projectSlug, target, chatId, reply, replyCard, sendToChat, sendCardToChat);
       return;
     }
+    if (sub === 'plan') {
+      if (!parts[1]) {
+        await reply('用法：/agent plan T-001 [项目slug]');
+        return;
+      }
+      const projectSlug = parts[2] || await manager.defaultProjectSlug();
+      const plan = await manager.planTask(projectSlug, parts[1].toUpperCase());
+      await reply(`已生成执行计划：${plan.task.id}\n计划文件：${plan.planFile}\n下一步：/agent approve ${plan.task.id} ${projectSlug}`);
+      return;
+    }
+    if (sub === 'approve') {
+      if (!parts[1]) {
+        await reply('用法：/agent approve T-001 [项目slug]');
+        return;
+      }
+      const projectSlug = parts[2] || await manager.defaultProjectSlug();
+      const task = await manager.approvePlan(projectSlug, parts[1].toUpperCase());
+      await reply(`已批准执行计划：${task.id}\n当前状态：${task.status}\n下一步：/agent run ${task.id} ${projectSlug}`);
+      return;
+    }
     if (sub === 'assign' || sub === 'send') {
       if (!parts[1] || !parts[2]) {
         await reply('用法：/agent assign T-001 执行对话名 [项目slug]');
@@ -926,6 +1037,8 @@ function agentHelp(): string {
     '任务说明',
     '/agent worker 执行对话名 [项目slug]',
     '/agent assign T-001 执行对话名 [项目slug]',
+    '/agent plan T-001 [项目slug]',
+    '/agent approve T-001 [项目slug]',
     '/agent run T-001',
     '/agent run all [项目slug]',
     '/agent status [项目slug]',
@@ -1037,7 +1150,9 @@ async function writeGovernanceFiles(projectPath: string, board: DispatchBoard): 
       '',
       '## 验收规则',
       '',
+      '- 复杂任务先生成 plans/<task-id>-plan.md，并经主控批准后执行。',
       '- 核验结果文件是否存在且包含必要章节。',
+      '- 调研类任务核验信息来源清单，必须包含来源机构、链接和时间。',
       '- 核验 task_board.json 与 09_dispatch_board.md 的队列状态是否一致。',
       '- 核验是否存在越权写入风险；一旦发现，任务进入 rework。',
       '- 主控验收记录写入 reviews/<task-id>-review.md。',
@@ -1075,7 +1190,11 @@ async function writeGovernanceFiles(projectPath: string, board: DispatchBoard): 
       '',
       '## 结果文件必须包含',
       '',
-      '核心结论、执行过程摘要、产出或发现、风险/阻塞、下一步建议。',
+      '核心结论、执行过程摘要、产出或发现、风险/阻塞、下一步建议、自动复核。',
+      '',
+      '## 自动复核必须覆盖',
+      '',
+      QUALITY_REVIEW_DIMENSIONS.join('、'),
       '',
     ].join('\n'),
     'utf8',
@@ -1216,6 +1335,23 @@ function isReviewableTask(task: DispatchTask): boolean {
   return REVIEWABLE_STATUSES.has(task.status);
 }
 
+function requiresPlan(task: DispatchTask): boolean {
+  if (task.planApproved) return false;
+  const text = `${task.title}\n${task.instructions}`;
+  return PLAN_FIRST_KEYWORDS.some((keyword) => text.includes(keyword));
+}
+
+function requiresSources(board: DispatchBoard, task: DispatchTask): boolean {
+  const text = `${board.project.name}\n${board.project.goal}\n${task.title}\n${task.instructions}`;
+  return RESEARCH_KEYWORDS.some((keyword) => text.includes(keyword));
+}
+
+function hasSourceList(body: string): boolean {
+  if (!/(信息来源|来源清单|参考来源|资料来源|Sources?)/i.test(body)) return false;
+  if (!/(https?:\/\/|www\.|机构|来源|时间|日期|发布|检索|访问)/i.test(body)) return false;
+  return true;
+}
+
 function nextTaskId(board: DispatchBoard): string {
   let max = 0;
   for (const task of board.tasks) {
@@ -1241,6 +1377,29 @@ async function appendProgress(projectPath: string, taskId: string, statusText: s
   const path = join(projectPath, 'progress', `${taskId}.md`);
   const old = await readFile(path, 'utf8').catch(() => '');
   await writeFile(path, `${old}- ${nowText()} [${statusText}] ${note}\n`, 'utf8');
+}
+
+async function appendHandoff(
+  projectPath: string,
+  task: DispatchTask,
+  statusText: string,
+  reviewFile: string,
+  findings: string[],
+): Promise<void> {
+  const path = join(projectPath, 'handoff.md');
+  const old = await readFile(path, 'utf8').catch(() => '# Handoff\n\n');
+  const note = [
+    '',
+    `## ${nowText()} ${task.id} ${task.title}`,
+    '',
+    `- 状态：${statusText}`,
+    `- 结果：${task.output}`,
+    `- 复核：${reviewFile}`,
+    `- 结论：${statusText === 'accepted' ? '可合并或归档。' : '需返工后重新验收。'}`,
+    `- 问题：${findings.length ? findings.join('；') : '未发现阻塞问题。'}`,
+    '',
+  ].join('\n');
+  await writeFile(path, `${old.trimEnd()}\n${note}`, 'utf8');
 }
 
 function extractSessionId(stdout: string): string {
@@ -1394,6 +1553,9 @@ function agentBoardCard(projectPath: string, board: DispatchBoard): object {
       ];
       if (isRunnableTask(task)) {
         buttons.unshift({ text: '开始执行', value: { cmd: 'agent.run', arg: `${task.id} ${board.project.slug}` }, style: 'primary' });
+      }
+      if (task.status === 'planned') {
+        buttons.unshift({ text: '批准计划', value: { cmd: 'agent.approve', arg: `${task.id} ${board.project.slug}` }, style: 'primary' });
       }
       if (hasReadableResult(task)) {
         buttons.unshift({ text: '查看结果', value: { cmd: 'agent.result', arg: `${task.id} ${board.project.slug}` } });

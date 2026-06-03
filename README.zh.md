@@ -177,6 +177,10 @@ Feishu/Lark chat
 
 /agent assign T-001 east 项目slug
 
+/agent plan T-001 项目slug
+
+/agent approve T-001 项目slug
+
 /agent run T-001 项目slug
 
 /agent result T-001 项目slug
@@ -200,13 +204,17 @@ Feishu/Lark chat
 - `07_上下文窗口治理机制.md`：长期规则，定义主控对话、执行对话、写入边界和越权检查。
 - `09_dispatch_board.md`：主控可读看板，由 `task_board.json` 自动同步生成，执行对话不得直接修改。
 - `templates/worker_startup_instruction.md`：执行对话启动指令模板。
+- `plans/T-xxx-plan.md`：复杂任务的执行计划，经 `/agent approve` 批准后才能执行。
 - `worker_state/T-xxx.json`：执行对话自己的状态文件。
 - `outputs/T-xxx-result.md`：执行对话结果文件。
 - `reviews/T-xxx-review.md`：主控验收记录，包含结果章节、自动复核维度和越权风险检查。
+- `handoff.md`：主控验收后的沉淀记录，用于后续合并、复盘和交接。
 
 执行对话只允许写自己的 `outputs/<task-id>-result.md` 和 `worker_state/<task-id>.json`。如果它修改 `project.md`、`task_board.json`、`09_dispatch_board.md`、治理机制文件或其它任务文件，`/agent review` 会把任务打回 `rework`。
 
 `/agent review` 不只检查文件是否存在，还要求结果包含：核心结论、执行过程摘要、产出或发现、风险/阻塞、下一步建议、自动复核。自动复核必须覆盖：事实准确性、逻辑完整性、执行可行性、表达质量、遗漏风险、方案影响。结果卡的主按钮是“自动验收”，用于避免直接人工通过绕过复核。
+
+带有“复杂、需要计划确认、多阶段、调研报告、实施方案”等特征的任务，会要求先 `/agent plan T-xxx` 生成执行计划，再 `/agent approve T-xxx` 批准后执行。调研、政策、市场、数据、案例、竞品、房地产等任务会强制检查信息来源清单；缺少来源机构、链接或时间会进入 `rework`。
 
 ## 用户 OAuth
 
