@@ -186,6 +186,8 @@ task instructions
 /agent result T-001 project-slug
 
 /agent review T-001 project-slug
+
+/agent clean project-slug
 ```
 
 For Huaring-style project governance, put the project brief in the `/agent new` body:
@@ -216,6 +218,17 @@ Workers run inside `worker_runs/<task-id>/` and may only write their own isolate
 `/agent review` requires these result sections: `核心结论`, `执行过程摘要`, `产出或发现`, `风险/阻塞`, `下一步建议`, and `自动复核`. The self-review must cover `事实准确性`, `逻辑完整性`, `执行可行性`, `表达质量`, `遗漏风险`, and `方案影响`. Review cards make “自动验收” the primary action so a task is not accepted before the supervisor review runs.
 
 Tasks marked with terms such as `复杂`, `需要计划确认`, `多阶段`, `调研报告`, or `实施方案` require `/agent plan T-xxx` followed by `/agent approve T-xxx` before they can run. Research, policy, market, data, case-study, competitor, and real-estate tasks require an information-source list. Source entries must include a link and publication or access time; a single source without `待验证` is returned to `rework`, while two or more recognizable sources pass the source gate.
+
+To also check whether source URLs are reachable, enable strict URL checking:
+
+```bash
+export FEISHU_BRIDGE_AGENT_SOURCE_URL_CHECK=1
+export FEISHU_BRIDGE_AGENT_SOURCE_URL_TIMEOUT_MS=5000
+```
+
+Strict URL checking is off by default so network instability, anti-bot behavior, or temporary timeouts do not incorrectly reject otherwise usable work.
+
+`/agent clean [project-slug]` removes `worker_runs/T-xxx/` directories only for `accepted` / `done` tasks. It keeps `reviewing`, `running`, `rework`, and other active traces available for review.
 
 ## User OAuth
 

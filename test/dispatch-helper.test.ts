@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -477,6 +477,58 @@ describe('dispatch helper', () => {
     expect(review.task.status).toBe('accepted');
   });
 
+  it('returns research outputs with unreachable source URLs to rework when strict URL checks are enabled', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'feishu-dispatch-source-url-check-'));
+    const manager = new DispatchManager({
+      projectsDir: join(root, 'projects'),
+      codexBin: 'codex',
+      defaultCwd: root,
+      sourceUrlCheck: async (url) => !url.includes('bad.example'),
+    });
+    const project = await manager.createProject('【房地产】市场调研 URL 校验', '核心目标：验证链接可达性');
+    await manager.addTask(project.slug, '政策调研', '整理政策数据');
+    await writeFile(
+      join(project.path, 'outputs', 'T-001-result.md'),
+      [
+        '## 核心结论',
+        '市场有变化。',
+        '',
+        '## 执行过程摘要',
+        '已整理。',
+        '',
+        '## 产出或发现',
+        '发现一个趋势。',
+        '',
+        '## 风险/阻塞',
+        '暂无。',
+        '',
+        '## 下一步建议',
+        '继续跟进。',
+        '',
+        '## 信息来源清单',
+        '- 国家统计局，https://www.stats.gov.cn/，检索时间：2026-06-03',
+        '- 错误来源，https://bad.example/not-found，检索时间：2026-06-03',
+        '',
+        '## 自动复核',
+        '- 事实准确性：通过。',
+        '- 逻辑完整性：通过。',
+        '- 执行可行性：通过。',
+        '- 表达质量：通过。',
+        '- 遗漏风险：通过。',
+        '- 方案影响：通过。',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    await manager.markTask(project.slug, 'T-001', 'reviewing');
+
+    const review = await manager.reviewTask(project.slug, 'T-001');
+
+    expect(review.task.status).toBe('rework');
+    expect(review.findings.join('\n')).toMatch(/来源链接不可达/);
+    expect(review.findings.join('\n')).toMatch(/bad\.example/);
+  });
+
   it('appends accepted supervisor reviews into handoff records', async () => {
     const root = await mkdtemp(join(tmpdir(), 'feishu-dispatch-handoff-'));
     const manager = new DispatchManager({
@@ -737,6 +789,106 @@ describe('dispatch helper', () => {
       workerChatId: 'oc_worker',
       supervisorChatId: 'oc_supervisor',
     });
+  });
+
+  it('runs assigned tasks from multiple worker chats and keeps their isolated outputs separate', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'feishu-dispatch-multi-worker-e2e-'));
+    const manager = new DispatchManager({
+      projectsDir: join(root, 'projects'),
+      codexBin: 'codex',
+      defaultCwd: root,
+      timeoutMs: 30_000,
+    });
+    const project = await manager.createProject('multi worker e2e', '验证多执行对话闭环');
+    await manager.addTask(project.slug, '执行任务 A', 'write worker A result');
+    await manager.addTask(project.slug, '执行任务 B', 'write worker B result');
+
+    await manager.registerWorker(project.slug, 'east', 'oc_worker_east');
+    await manager.registerWorker(project.slug, 'west', 'oc_worker_west');
+    await manager.assignTask(project.slug, 'T-001', 'east', 'oc_supervisor');
+    await manager.assignTask(project.slug, 'T-002', 'west', 'oc_supervisor');
+
+    const fakeMultiWorkerCodex = join(root, 'fake-multi-worker-codex');
+    await writeFile(
+      fakeMultiWorkerCodex,
+      [
+        '#!/bin/sh',
+        'prompt="${@: -1}"',
+        'case "$prompt" in',
+        "  *T-001*) tid='T-001'; sid='aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'; text='east result' ;;",
+        "  *T-002*) tid='T-002'; sid='bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'; text='west result' ;;",
+        "  *) tid='unknown'; sid='00000000-0000-0000-0000-000000000000'; text='unknown result' ;;",
+        'esac',
+        'mkdir -p outputs',
+        'printf "%s\\n" "$text" > "outputs/${tid}-result.md"',
+        'while [ "$1" != "" ]; do',
+        '  if [ "$1" = "--output-last-message" ]; then',
+        '    shift',
+        '    printf "%s summary\\n" "$tid" > "$1"',
+        '  fi',
+        '  shift || exit 0',
+        'done',
+        'printf \'{"thread_id":"%s"}\\n\' "$sid"',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    await chmod(fakeMultiWorkerCodex, 0o755);
+
+    const runner = new DispatchManager({
+      projectsDir: join(root, 'projects'),
+      codexBin: fakeMultiWorkerCodex,
+      defaultCwd: root,
+      timeoutMs: 30_000,
+    });
+    await Promise.all([
+      runner.runTask(project.slug, 'T-001', 'oc_worker_east'),
+      runner.runTask(project.slug, 'T-002', 'oc_worker_west'),
+    ]);
+
+    const board = JSON.parse(await readFile(join(project.path, 'task_board.json'), 'utf8'));
+    expect(board.tasks).toMatchObject([
+      { id: 'T-001', status: 'reviewing', workerChatId: 'oc_worker_east' },
+      { id: 'T-002', status: 'reviewing', workerChatId: 'oc_worker_west' },
+    ]);
+    await expect(readFile(join(project.path, 'outputs', 'T-001-result.md'), 'utf8')).resolves.toBe('east result\n');
+    await expect(readFile(join(project.path, 'outputs', 'T-002-result.md'), 'utf8')).resolves.toBe('west result\n');
+    await stat(join(project.path, 'worker_runs', 'T-001'));
+    await stat(join(project.path, 'worker_runs', 'T-002'));
+  });
+
+  it('cleans isolated worker runs for accepted tasks from /agent clean', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'feishu-dispatch-clean-'));
+    const manager = new DispatchManager({
+      projectsDir: join(root, 'projects'),
+      codexBin: 'codex',
+      defaultCwd: root,
+    });
+    const project = await manager.createProject('clean worker runs', '验证清理隔离执行目录');
+    await manager.addTask(project.slug, '已验收任务', 'accepted task');
+    await manager.addTask(project.slug, '待复核任务', 'reviewing task');
+    await manager.markTask(project.slug, 'T-001', 'accepted');
+    await manager.markTask(project.slug, 'T-002', 'reviewing');
+    await mkdir(join(project.path, 'worker_runs', 'T-001'), { recursive: true });
+    await mkdir(join(project.path, 'worker_runs', 'T-002'), { recursive: true });
+    await writeFile(join(project.path, 'worker_runs', 'T-001', 'trace.md'), 'old accepted trace\n', 'utf8');
+    await writeFile(join(project.path, 'worker_runs', 'T-002', 'trace.md'), 'active reviewing trace\n', 'utf8');
+
+    const replies: string[] = [];
+    await handleAgentCommand({
+      args: `clean ${project.slug}`,
+      chatId: 'oc_supervisor',
+      cwd: root,
+      projectsDir: join(root, 'projects'),
+      reply: async (text) => {
+        replies.push(text);
+      },
+    });
+
+    expect(replies).toHaveLength(1);
+    expect(replies[0]).toMatch(/已清理 1 个隔离执行目录/);
+    await expect(stat(join(project.path, 'worker_runs', 'T-001'))).rejects.toThrow();
+    await stat(join(project.path, 'worker_runs', 'T-002'));
   });
 
   it('renders result review cards as CardKit 2.0 callback cards', async () => {

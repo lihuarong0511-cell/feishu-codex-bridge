@@ -186,6 +186,8 @@ Feishu/Lark chat
 /agent result T-001 项目slug
 
 /agent review T-001 项目slug
+
+/agent clean 项目slug
 ```
 
 创建项目时建议按华荣项目字段填写目标正文：
@@ -216,6 +218,17 @@ Feishu/Lark chat
 `/agent review` 不只检查文件是否存在，还要求结果包含：核心结论、执行过程摘要、产出或发现、风险/阻塞、下一步建议、自动复核。自动复核必须覆盖：事实准确性、逻辑完整性、执行可行性、表达质量、遗漏风险、方案影响。结果卡的主按钮是“自动验收”，用于避免直接人工通过绕过复核。
 
 带有“复杂、需要计划确认、多阶段、调研报告、实施方案”等特征的任务，会要求先 `/agent plan T-xxx` 生成执行计划，再 `/agent approve T-xxx` 批准后执行。调研、政策、市场、数据、案例、竞品、房地产等任务会强制检查信息来源清单；来源条目必须包含链接和发布时间/检索时间。单一来源未标注“待验证”会进入 `rework`，两条以上可识别来源才视为通过。
+
+如果还要检查来源 URL 是否真实可访问，可以开启严格模式：
+
+```bash
+export FEISHU_BRIDGE_AGENT_SOURCE_URL_CHECK=1
+export FEISHU_BRIDGE_AGENT_SOURCE_URL_TIMEOUT_MS=5000
+```
+
+严格模式默认关闭，避免网络波动、反爬或临时超时把可用结果误判为返工。
+
+`/agent clean [项目slug]` 会清理已 `accepted` / `done` 任务的 `worker_runs/T-xxx/` 隔离执行目录，保留 `reviewing`、`running`、`rework` 等仍需追溯的执行现场。
 
 ## 用户 OAuth
 

@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, readFile, readdir, rename, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 
@@ -225,12 +225,15 @@ interface ProcessResult {
   stderr: string;
 }
 
+type SourceUrlCheck = (url: string) => boolean | Promise<boolean>;
+
 export interface DispatchManagerOptions {
   projectsDir?: string;
   codexBin?: string;
   defaultCwd?: string;
   maxWorkers?: number;
   timeoutMs?: number;
+  sourceUrlCheck?: SourceUrlCheck;
 }
 
 export interface HandleAgentCommandOptions {
@@ -251,6 +254,7 @@ export class DispatchManager {
   readonly defaultCwd: string;
   readonly maxWorkers: number;
   readonly timeoutMs: number;
+  readonly sourceUrlCheck?: SourceUrlCheck;
 
   constructor(opts: DispatchManagerOptions = {}) {
     this.projectsDir = resolve(
@@ -267,6 +271,7 @@ export class DispatchManager {
       Number(opts.timeoutMs ?? process.env.FEISHU_BRIDGE_AGENT_TIMEOUT_MS ?? 600_000) ||
         600_000,
     );
+    this.sourceUrlCheck = opts.sourceUrlCheck ?? (sourceUrlCheckEnabled() ? defaultSourceUrlCheck : undefined);
   }
 
   async createProject(name: string, goal = ''): Promise<{ name: string; slug: string; path: string }> {
@@ -703,7 +708,9 @@ export class DispatchManager {
     if (missingReviewDimensions.length) {
       findings.push(`自动复核缺少质量维度：${missingReviewDimensions.join('、')}`);
     }
-    const sourceAssessment = requiresSources(board, task) ? assessSources(body) : { ok: true, reason: '' };
+    const sourceAssessment = requiresSources(board, task)
+      ? await assessSources(body, this.sourceUrlCheck)
+      : { ok: true, reason: '' };
     if (!sourceAssessment.ok) findings.push(sourceAssessment.reason);
     const overreachFiles = (task.overreachFiles ?? []).filter(Boolean);
     if (overreachFiles.length) findings.push(`发现越权写入风险：${overreachFiles.join('、')}`);
@@ -800,6 +807,24 @@ export class DispatchManager {
     const projectPath = await this.projectPath(projectSlug);
     const board = await readBoard(projectPath);
     return agentBoardCard(projectPath, board);
+  }
+
+  async cleanWorkerRuns(projectSlug: string): Promise<{ removed: string[]; kept: string[] }> {
+    const projectPath = await this.projectPath(projectSlug);
+    const board = await readBoard(projectPath);
+    const removed: string[] = [];
+    const kept: string[] = [];
+    for (const task of board.tasks) {
+      const runPath = join(projectPath, 'worker_runs', task.id);
+      if (!await exists(runPath)) continue;
+      if (task.status === 'accepted' || task.status === 'done') {
+        await rm(runPath, { recursive: true, force: true });
+        removed.push(task.id);
+      } else {
+        kept.push(task.id);
+      }
+    }
+    return { removed, kept };
   }
 
   async uniqueSlug(base: string): Promise<string> {
@@ -997,6 +1022,19 @@ export async function handleAgentCommand(opts: HandleAgentCommandOptions): Promi
       await reply(`已更新任务：${task.id} -> ${task.status}`);
       return;
     }
+    if (sub === 'clean') {
+      const projectSlug = parts[1] || await manager.defaultProjectSlug();
+      const result = await manager.cleanWorkerRuns(projectSlug);
+      await reply(
+        [
+          `已清理 ${result.removed.length} 个隔离执行目录。`,
+          `项目：${projectSlug}`,
+          `已清理：${result.removed.length ? result.removed.join('、') : '无'}`,
+          `保留：${result.kept.length ? result.kept.join('、') : '无'}`,
+        ].join('\n'),
+      );
+      return;
+    }
     await reply(agentHelp());
   } catch (err) {
     await reply(`调度命令失败：${err instanceof Error ? err.message : String(err)}`);
@@ -1053,8 +1091,9 @@ function agentHelp(): string {
     '/agent result T-001 [项目slug]',
     '/agent review T-001 [项目slug]',
     '/agent mark T-001 accepted|rework|done [项目slug]',
+    '/agent clean [项目slug]',
     '',
-    '约定：主控负责分派和复核；执行对话只处理被分配任务并写 outputs/ 与 worker_state/。',
+    '约定：主控负责分派和复核；执行对话在 worker_runs/<task-id>/ 隔离目录内处理被分配任务。',
   ].join('\n');
 }
 
@@ -1406,7 +1445,7 @@ function requiresSources(board: DispatchBoard, task: DispatchTask): boolean {
   return RESEARCH_KEYWORDS.some((keyword) => text.includes(keyword));
 }
 
-function assessSources(body: string): { ok: boolean; reason: string } {
+async function assessSources(body: string, sourceUrlCheck?: SourceUrlCheck): Promise<{ ok: boolean; reason: string }> {
   const sourceSection = extractSourceSection(body);
   if (!sourceSection.trim()) {
     return {
@@ -1426,6 +1465,15 @@ function assessSources(body: string): { ok: boolean; reason: string } {
       ok: false,
       reason: '调研类任务只有单一来源且未标注“待验证”：需补充第二来源，或明确标注该信息待验证。',
     };
+  }
+  if (sourceUrlCheck) {
+    const unreachable = await unreachableSourceUrls(extractSourceUrls(sourceSection), sourceUrlCheck);
+    if (unreachable.length) {
+      return {
+        ok: false,
+        reason: `来源链接不可达：${unreachable.join('、')}`,
+      };
+    }
   }
   return { ok: true, reason: '' };
 }
@@ -1451,6 +1499,63 @@ function countSourceEntries(sourceSection: string): number {
     count += 1;
   }
   return count;
+}
+
+function extractSourceUrls(sourceSection: string): string[] {
+  const urls = new Set<string>();
+  for (const match of sourceSection.matchAll(/https?:\/\/[^\s，。）、)>\]]+/gi)) {
+    urls.add(match[0].replace(/[,.，。]+$/, ''));
+  }
+  for (const match of sourceSection.matchAll(/(?:^|[\s，。])www\.[^\s，。）、)>\]]+/gi)) {
+    urls.add(`https://${match[0].trim().replace(/[,.，。]+$/, '')}`);
+  }
+  return [...urls];
+}
+
+async function unreachableSourceUrls(urls: string[], sourceUrlCheck: SourceUrlCheck): Promise<string[]> {
+  const unreachable: string[] = [];
+  for (const url of urls) {
+    let ok = false;
+    try {
+      ok = Boolean(await sourceUrlCheck(url));
+    } catch {
+      ok = false;
+    }
+    if (!ok) unreachable.push(url);
+  }
+  return unreachable;
+}
+
+function sourceUrlCheckEnabled(): boolean {
+  return /^(1|true|yes|on)$/i.test(String(process.env.FEISHU_BRIDGE_AGENT_SOURCE_URL_CHECK || ''));
+}
+
+async function defaultSourceUrlCheck(url: string): Promise<boolean> {
+  const controller = new AbortController();
+  const timeoutMs = Math.max(
+    1000,
+    Number(process.env.FEISHU_BRIDGE_AGENT_SOURCE_URL_TIMEOUT_MS || 5000) || 5000,
+  );
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const head = await fetch(url, {
+      method: 'HEAD',
+      redirect: 'follow',
+      signal: controller.signal,
+    });
+    if (head.ok || (head.status >= 300 && head.status < 400)) return true;
+    if (head.status !== 405 && head.status !== 403) return false;
+    const get = await fetch(url, {
+      method: 'GET',
+      redirect: 'follow',
+      signal: controller.signal,
+    });
+    return get.ok || (get.status >= 300 && get.status < 400);
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function nextTaskId(board: DispatchBoard): string {
