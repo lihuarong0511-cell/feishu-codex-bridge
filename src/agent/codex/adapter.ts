@@ -12,6 +12,21 @@ export interface CodexAdapterOptions {
 
 type CodexChild = ChildProcessByStdio<null, Readable, Readable>;
 
+const BENIGN_STDERR_PATTERNS: Array<{ kind: string; pattern: RegExp }> = [
+  {
+    kind: 'codex-session-load',
+    pattern: /codex_core::session::session: failed to load/,
+  },
+  {
+    kind: 'mcp-worker-exit',
+    pattern: /rmcp::transport::worker: worker quit with(?: fatal)?/,
+  },
+  {
+    kind: 'memory-phase2-no-change',
+    pattern: /codex_memories_write::phase2: Phase 2 no chang/,
+  },
+];
+
 const BRIDGE_SYSTEM_PROMPT = `# feishu-codex-bridge 运行约定
 
 你正在 feishu-codex-bridge 里跑：把飞书/Lark 用户消息桥到本地 \`codex exec\` CLI。
@@ -150,7 +165,7 @@ export class CodexAdapter implements AgentAdapter {
       while (nl !== -1) {
         const line = stderrBuffer.slice(0, nl);
         stderrBuffer = stderrBuffer.slice(nl + 1);
-        if (line.trim()) log.warn('agent', 'stderr', { line });
+        surfaceStderrLine(line);
         nl = stderrBuffer.indexOf('\n');
       }
     });
@@ -207,6 +222,23 @@ export class CodexAdapter implements AgentAdapter {
       },
     };
   }
+}
+
+export function classifyAgentStderr(line: string): { kind: string } | null {
+  for (const known of BENIGN_STDERR_PATTERNS) {
+    if (known.pattern.test(line)) return { kind: known.kind };
+  }
+  return null;
+}
+
+function surfaceStderrLine(line: string): void {
+  if (!line.trim()) return;
+  const benign = classifyAgentStderr(line);
+  if (benign) {
+    log.info('agent', 'stderr-noise', { kind: benign.kind, line });
+    return;
+  }
+  log.warn('agent', 'stderr', { line });
 }
 
 export function buildCodexArgs(opts: AgentRunOptions, prompt: string): string[] {

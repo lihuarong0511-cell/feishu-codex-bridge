@@ -217,7 +217,7 @@ Workers run inside `worker_runs/<task-id>/` and may only write their own isolate
 
 `/agent review` requires these result sections: `核心结论`, `执行过程摘要`, `产出或发现`, `风险/阻塞`, `下一步建议`, and `自动复核`. The self-review must cover `事实准确性`, `逻辑完整性`, `执行可行性`, `表达质量`, `遗漏风险`, and `方案影响`. Review cards make “自动验收” the primary action so a task is not accepted before the supervisor review runs.
 
-Tasks marked with terms such as `复杂`, `需要计划确认`, `多阶段`, `调研报告`, or `实施方案` require `/agent plan T-xxx` followed by `/agent approve T-xxx` before they can run. Research, policy, market, data, case-study, competitor, and real-estate tasks require an information-source list. Source entries must include a link and publication or access time; a single source without `待验证` is returned to `rework`, while two or more recognizable sources pass the source gate.
+Tasks marked with terms such as `复杂`, `需要计划确认`, `多阶段`, `调研报告`, or `实施方案` require `/agent plan T-xxx` followed by `/agent approve T-xxx` before they can run. Research, study, policy, market, data, competitor, real-estate, and explicit case-study tasks such as `案例调研`, `案例研究`, `参考案例`, `案例分析`, or `案例资料` require an information-source list. Source entries must include a link and publication or access time; a single source without `待验证` is returned to `rework`, while two or more recognizable sources pass the source gate. Validation, rehearsal, and test tasks do not require source lists by default when they explicitly say they should not browse, should not read external material, or are not research tasks.
 
 To also check whether source URLs are reachable, enable strict URL checking:
 
