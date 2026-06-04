@@ -98,6 +98,13 @@ describe('codex adapter args', () => {
       for await (const event of run.events) events.push(event);
 
       expect(events).toEqual([]);
+      expect(infoSpy).toHaveBeenCalledWith(
+        'agent',
+        'spawn',
+        expect.objectContaining({
+          obsidianMcpEnabled: false,
+        }),
+      );
       expect(infoSpy).toHaveBeenCalledWith('agent', 'stderr-noise', {
         kind: 'codex-session-load',
         line: knownNoise,

@@ -138,8 +138,9 @@ export class CodexAdapter implements AgentAdapter {
 
   run(opts: AgentRunOptions): AgentRun {
     const prompt = `${BRIDGE_SYSTEM_PROMPT}\n\n---\n\n${opts.prompt}`;
+    const obsidianMcpEnabled = process.env.FEISHU_BRIDGE_ENABLE_OBSIDIAN_MCP === '1';
     const args = buildCodexArgs(opts, prompt, {
-      enableObsidianMcp: process.env.FEISHU_BRIDGE_ENABLE_OBSIDIAN_MCP === '1',
+      enableObsidianMcp: obsidianMcpEnabled,
     });
 
     const child = spawn(this.binary, args, {
@@ -156,6 +157,7 @@ export class CodexAdapter implements AgentAdapter {
       model: opts.model,
       reasoningEffort: opts.reasoningEffort,
       images: opts.images?.length ?? 0,
+      obsidianMcpEnabled,
     });
 
     const stderrChunks: Buffer[] = [];
