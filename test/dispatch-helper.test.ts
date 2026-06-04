@@ -25,6 +25,15 @@ async function fakeCodex(path: string, result: string, threadId = '33333333-3333
   return path;
 }
 
+async function waitFor(check: () => Promise<boolean>, timeoutMs = 2000): Promise<void> {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    if (await check()) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error('timed out waiting for condition');
+}
+
 describe('dispatch helper', () => {
   it('creates a project, runs a worker, and writes output for review', async () => {
     const root = await mkdtemp(join(tmpdir(), 'feishu-dispatch-'));
@@ -888,6 +897,60 @@ describe('dispatch helper', () => {
       workerChatId: 'oc_worker',
       supervisorChatId: 'oc_supervisor',
     });
+  });
+
+  it('notifies the supervisor when an assigned worker run fails', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'feishu-dispatch-worker-fail-notify-'));
+    const manager = new DispatchManager({
+      projectsDir: join(root, 'projects'),
+      codexBin: 'codex',
+      defaultCwd: root,
+      timeoutMs: 30_000,
+    });
+    const project = await manager.createProject('worker fail notify', '验证执行失败通知主控');
+    await manager.addTask(project.slug, '失败任务', 'fail and notify');
+    await manager.registerWorker(project.slug, 'east', 'oc_worker');
+    await manager.assignTask(project.slug, 'T-001', 'east', 'oc_supervisor');
+
+    const fakeFailingCodex = join(root, 'fake-notify-failing-codex');
+    await writeFile(
+      fakeFailingCodex,
+      [
+        '#!/bin/sh',
+        'printf "worker exploded\\n" >&2',
+        'exit 42',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    await chmod(fakeFailingCodex, 0o755);
+
+    const workerReplies: string[] = [];
+    const supervisorMessages: Array<{ chatId: string; text: string }> = [];
+    await handleAgentCommand({
+      args: `run T-001 ${project.slug}`,
+      chatId: 'oc_worker',
+      codexBin: fakeFailingCodex,
+      cwd: root,
+      projectsDir: join(root, 'projects'),
+      reply: async (text) => {
+        workerReplies.push(text);
+      },
+      sendToChat: async (chatId, text) => {
+        supervisorMessages.push({ chatId, text });
+      },
+    });
+    await waitFor(async () => {
+      const task = await manager.getTask(project.slug, 'T-001');
+      return task.status === 'failed' && workerReplies.join('\n').includes('调度任务失败');
+    });
+
+    expect(workerReplies.join('\n')).toMatch(/调度任务失败/);
+    expect(supervisorMessages).toHaveLength(1);
+    expect(supervisorMessages[0]).toMatchObject({ chatId: 'oc_supervisor' });
+    expect(supervisorMessages[0]?.text).toMatch(/执行对话任务失败/);
+    expect(supervisorMessages[0]?.text).toMatch(/状态：failed/);
+    expect(supervisorMessages[0]?.text).toMatch(/worker exploded/);
   });
 
   it('runs assigned tasks from multiple worker chats and keeps their isolated outputs separate', async () => {

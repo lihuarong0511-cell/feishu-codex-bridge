@@ -1078,7 +1078,36 @@ async function runAndNotify(
       }
     }
   } catch (err) {
-    await reply(`调度任务失败：${projectSlug}/${taskId}\n${err instanceof Error ? err.message : String(err)}`);
+    const message = err instanceof Error ? err.message : String(err);
+    await reply(`调度任务失败：${projectSlug}/${taskId}\n${message}`);
+    await notifySupervisorRunFailed(manager, projectSlug, taskId, chatId, sendToChat, message);
+  }
+}
+
+async function notifySupervisorRunFailed(
+  manager: DispatchManager,
+  projectSlug: string,
+  taskId: string,
+  chatId: string,
+  sendToChat: ((chatId: string, text: string) => Promise<void>) | undefined,
+  fallbackError: string,
+): Promise<void> {
+  if (!sendToChat) return;
+  try {
+    const task = await manager.getTask(projectSlug, taskId);
+    if (!task.supervisorChatId || task.supervisorChatId === chatId) return;
+    const error = String(task.error || fallbackError || '无错误输出').trim();
+    await sendToChat(
+      task.supervisorChatId,
+      [
+        `执行对话任务失败：${projectSlug}/${task.id}`,
+        `状态：${task.status}`,
+        `错误：${error}`,
+        `下一步：/agent status ${projectSlug}`,
+      ].join('\n'),
+    );
+  } catch {
+    // Worker-side failure reply above must remain the primary observable error.
   }
 }
 
