@@ -14,6 +14,8 @@ describe('codex adapter args', () => {
       '--skip-git-repo-check',
       '--dangerously-bypass-approvals-and-sandbox',
       '-c',
+      'mcp_servers.obsidian.enabled=false',
+      '-c',
       'model_reasoning_effort="xhigh"',
       'hello',
     ]);
@@ -32,14 +34,24 @@ describe('codex adapter args', () => {
       '--skip-git-repo-check',
       '--dangerously-bypass-approvals-and-sandbox',
       '-c',
+      'mcp_servers.obsidian.enabled=false',
+      '-c',
       'model_reasoning_effort="high"',
       'session-1',
       'hello',
     ]);
   });
 
-  it('keeps reasoning effort unset by default so Codex inherits global config', () => {
-    expect(buildCodexArgs({ prompt: 'ignored' }, 'hello')).not.toContain('-c');
+  it('disables optional Obsidian MCP by default so bridge runs are not blocked by local TLS state', () => {
+    expect(buildCodexArgs({ prompt: 'ignored' }, 'hello')).toEqual([
+      'exec',
+      '--json',
+      '--skip-git-repo-check',
+      '--dangerously-bypass-approvals-and-sandbox',
+      '-c',
+      'mcp_servers.obsidian.enabled=false',
+      'hello',
+    ]);
   });
 
   it('downgrades known benign stderr noise but still warns on unknown stderr', async () => {

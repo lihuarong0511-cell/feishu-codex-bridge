@@ -246,6 +246,8 @@ export function buildCodexArgs(opts: AgentRunOptions, prompt: string): string[] 
     '--json',
     '--skip-git-repo-check',
     '--dangerously-bypass-approvals-and-sandbox',
+    '-c',
+    'mcp_servers.obsidian.enabled=false',
   ];
   if (opts.model) common.push('--model', opts.model);
   if (opts.reasoningEffort) {
