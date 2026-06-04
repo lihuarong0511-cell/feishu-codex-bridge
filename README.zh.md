@@ -332,6 +332,14 @@ feishu-codex-bridge service logs --follow
 
 `health` 用来做快速 live 巡检：launchd 状态、近期 WebSocket 日志、已安装运行时代码标记、常见噪声日志。如果 bridge 已连接但飞书里没反应，优先检查开放平台的权限 scope 和事件订阅。
 
+需要被动观察稳定性时，安装 health monitor。它只记录 health 输出，不会自动重启 bridge，也不会杀掉正在跑的 Codex：
+
+```bash
+feishu-codex-bridge health-monitor install --interval 900
+feishu-codex-bridge health-monitor status
+feishu-codex-bridge health-monitor logs
+```
+
 **Codex CLI 缺失或没登录**
 
 ```bash

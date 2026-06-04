@@ -332,6 +332,14 @@ feishu-codex-bridge service logs --follow
 
 `health` is the quick live check: launchd state, recent WebSocket logs, installed runtime markers, and common noisy log signatures. If the bridge is connected but chat is silent, check open-platform scopes and event subscriptions first.
 
+For passive stability observation, install the health monitor. It only records health output; it does not restart the bridge or kill Codex runs:
+
+```bash
+feishu-codex-bridge health-monitor install --interval 900
+feishu-codex-bridge health-monitor status
+feishu-codex-bridge health-monitor logs
+```
+
 **Codex CLI is missing or not logged in**
 
 ```bash

@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import pkg from '../../package.json';
 import { runDoctor } from './commands/doctor';
 import { runHealth } from './commands/health';
+import { runHealthMonitor } from './commands/health-monitor';
 import { runMigrate } from './commands/migrate';
 import { runPs, runStopCli } from './commands/ps';
 import {
@@ -101,6 +102,15 @@ program
   .description('Check live launchd service, bridge logs, and installed runtime markers')
   .action(async () => {
     await runHealth();
+  });
+
+program
+  .command('health-monitor <action>')
+  .description('Manage passive health check LaunchAgent: install | status | logs | uninstall | run')
+  .option('--interval <seconds>', 'polling interval for install; clamped to 60..86400 seconds')
+  .option('-f, --follow', 'follow health monitor logs')
+  .action(async (action: string, opts: { interval?: string; follow?: boolean }) => {
+    await runHealthMonitor(action, opts);
   });
 
 program
