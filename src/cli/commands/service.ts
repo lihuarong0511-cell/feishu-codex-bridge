@@ -8,7 +8,10 @@ const SERVICE_LABEL = 'com.feishu-codex-bridge.default';
 const PLIST_PATH = join(homedir(), 'Library', 'LaunchAgents', `${SERVICE_LABEL}.plist`);
 const SERVICE_LOG_PATH = join(paths.appDir, 'service.log');
 const SERVICE_ERR_LOG_PATH = join(paths.appDir, 'service.err.log');
-const LAUNCHD_ENV_ALLOWLIST = ['OBSIDIAN_LOCAL_REST_API_KEY'] as const;
+const LAUNCHD_ENV_ALLOWLIST = [
+  'OBSIDIAN_LOCAL_REST_API_KEY',
+  'FEISHU_BRIDGE_ENABLE_OBSIDIAN_MCP',
+] as const;
 
 export interface ServiceOptions {
   config?: string;
