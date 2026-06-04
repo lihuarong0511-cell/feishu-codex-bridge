@@ -246,6 +246,26 @@ async function handleNewChat(rawName: string, ctx: CommandContext): Promise<void
     ctx.workspaces.setCwd(created.chatId, sourceCwd);
   }
 
+  const access = ctx.controls.cfg.preferences?.access;
+  const allowedChats = access?.allowedChats;
+  if (allowedChats && allowedChats.length > 0 && !allowedChats.includes(created.chatId)) {
+    allowedChats.push(created.chatId);
+    try {
+      await saveConfig(ctx.controls.cfg, ctx.controls.configPath);
+      log.info('command', 'new-chat-allowlisted', {
+        chatId: created.chatId.slice(-6),
+        allowedChatsCount: allowedChats.length,
+      });
+    } catch (err) {
+      log.fail('command', err, { step: 'new-chat.allowlist-save' });
+      await reply(
+        ctx,
+        `⚠️ 群 **${created.name}** 已创建,但写入群白名单失败。请把 \`${created.chatId}\` 手动加入 /config 的群白名单。`,
+      );
+      return;
+    }
+  }
+
   // Welcome the user inside the new group with a hint about how to start.
   const welcome = sourceCwd
     ? `🎉 群已建好，cwd 继承自原群：\`${sourceCwd}\`\n\n@我 + 任意消息开始对话。`
