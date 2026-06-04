@@ -54,6 +54,20 @@ describe('codex adapter args', () => {
     ]);
   });
 
+  it('allows explicitly enabling Obsidian MCP for bridge runs', () => {
+    expect(
+      buildCodexArgs({ prompt: 'ignored' }, 'hello', {
+        enableObsidianMcp: true,
+      }),
+    ).toEqual([
+      'exec',
+      '--json',
+      '--skip-git-repo-check',
+      '--dangerously-bypass-approvals-and-sandbox',
+      'hello',
+    ]);
+  });
+
   it('downgrades known benign stderr noise but still warns on unknown stderr', async () => {
     const root = await mkdtemp(join(tmpdir(), 'feishu-codex-adapter-stderr-'));
     const fakeCodex = join(root, 'fake-codex');

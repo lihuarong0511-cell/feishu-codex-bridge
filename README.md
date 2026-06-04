@@ -241,6 +241,16 @@ lark-cli auth login --recommend
 
 Bot identity being ready does not mean user OAuth is complete. Tenant/bot APIs can work with bot identity; personal resources usually require user OAuth.
 
+## Optional Obsidian MCP
+
+Bridge runs disable the globally configured Codex `obsidian` MCP by default, so a self-signed local Obsidian Local REST API certificate or a stopped local service does not add noise to the Feishu/Lark message path. To let Codex launched from Feishu/Lark use Obsidian MCP directly, set this before starting the service:
+
+```bash
+export FEISHU_BRIDGE_ENABLE_OBSIDIAN_MCP=1
+```
+
+Before enabling it, verify that `https://127.0.0.1:27124/mcp/` can complete MCP `initialize` and that `OBSIDIAN_LOCAL_REST_API_KEY` is present in the launchd service environment.
+
 ## Develop From Source
 
 The npm package already contains `dist/` and can run directly. A fresh clone needs dependencies and a build first:

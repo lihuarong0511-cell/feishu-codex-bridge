@@ -138,7 +138,9 @@ export class CodexAdapter implements AgentAdapter {
 
   run(opts: AgentRunOptions): AgentRun {
     const prompt = `${BRIDGE_SYSTEM_PROMPT}\n\n---\n\n${opts.prompt}`;
-    const args = buildCodexArgs(opts, prompt);
+    const args = buildCodexArgs(opts, prompt, {
+      enableObsidianMcp: process.env.FEISHU_BRIDGE_ENABLE_OBSIDIAN_MCP === '1',
+    });
 
     const child = spawn(this.binary, args, {
       cwd: opts.cwd,
@@ -241,14 +243,19 @@ function surfaceStderrLine(line: string): void {
   log.warn('agent', 'stderr', { line });
 }
 
-export function buildCodexArgs(opts: AgentRunOptions, prompt: string): string[] {
+export function buildCodexArgs(
+  opts: AgentRunOptions,
+  prompt: string,
+  runtime: { enableObsidianMcp?: boolean } = {},
+): string[] {
   const common = [
     '--json',
     '--skip-git-repo-check',
     '--dangerously-bypass-approvals-and-sandbox',
-    '-c',
-    'mcp_servers.obsidian.enabled=false',
   ];
+  if (!runtime.enableObsidianMcp) {
+    common.push('-c', 'mcp_servers.obsidian.enabled=false');
+  }
   if (opts.model) common.push('--model', opts.model);
   if (opts.reasoningEffort) {
     common.push('-c', `model_reasoning_effort="${opts.reasoningEffort}"`);

@@ -241,6 +241,16 @@ lark-cli auth login --recommend
 
 bot 身份可用不等于用户 OAuth 已完成。很多租户级 API 可以用 bot 身份；读个人资源通常需要用户 OAuth。
 
+## 可选 Obsidian MCP
+
+桥接服务默认禁用 Codex 全局配置里的 `obsidian` MCP，避免本地 Obsidian Local REST API 的自签 HTTPS 证书或未启动状态影响飞书消息主链路。如果确实需要让飞书会话里的 Codex 直接调用 Obsidian MCP，可以在启动服务前设置：
+
+```bash
+export FEISHU_BRIDGE_ENABLE_OBSIDIAN_MCP=1
+```
+
+开启前应确认 `https://127.0.0.1:27124/mcp/` 能完成 MCP `initialize`，并且 `OBSIDIAN_LOCAL_REST_API_KEY` 已进入 launchd 服务环境。
+
 ## 源码开发
 
 从 npm 安装的包已经包含 `dist/`，可以直接运行。clone 仓库开发时需要先安装依赖并构建：
