@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import pkg from '../../package.json';
 import { runDoctor } from './commands/doctor';
+import { runHealth } from './commands/health';
 import { runMigrate } from './commands/migrate';
 import { runPs, runStopCli } from './commands/ps';
 import {
@@ -93,6 +94,13 @@ program
   .option('-c, --config <path>', 'path to config file')
   .action(async (opts: { config?: string }) => {
     await runDoctor(opts);
+  });
+
+program
+  .command('health')
+  .description('Check live launchd service, bridge logs, and installed runtime markers')
+  .action(async () => {
+    await runHealth();
   });
 
 program

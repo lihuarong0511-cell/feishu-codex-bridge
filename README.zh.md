@@ -319,6 +319,7 @@ grep '"event":"enter"' ~/.feishu-codex-bridge/logs/$(date +%Y-%m-%d).log | tail 
 先确认进程和服务：
 
 ```bash
+feishu-codex-bridge health
 feishu-codex-bridge ps
 feishu-codex-bridge service status
 ```
@@ -329,7 +330,7 @@ feishu-codex-bridge service status
 feishu-codex-bridge service logs --follow
 ```
 
-如果 bridge 已连接但飞书里没反应，优先检查开放平台的权限 scope 和事件订阅。
+`health` 用来做快速 live 巡检：launchd 状态、近期 WebSocket 日志、已安装运行时代码标记、常见噪声日志。如果 bridge 已连接但飞书里没反应，优先检查开放平台的权限 scope 和事件订阅。
 
 **Codex CLI 缺失或没登录**
 

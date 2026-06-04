@@ -319,6 +319,7 @@ grep '"event":"enter"' ~/.feishu-codex-bridge/logs/$(date +%Y-%m-%d).log | tail 
 Check process and service state:
 
 ```bash
+feishu-codex-bridge health
 feishu-codex-bridge ps
 feishu-codex-bridge service status
 ```
@@ -329,7 +330,7 @@ Follow logs:
 feishu-codex-bridge service logs --follow
 ```
 
-If the bridge is connected but chat is silent, check open-platform scopes and event subscriptions first.
+`health` is the quick live check: launchd state, recent WebSocket logs, installed runtime markers, and common noisy log signatures. If the bridge is connected but chat is silent, check open-platform scopes and event subscriptions first.
 
 **Codex CLI is missing or not logged in**
 
