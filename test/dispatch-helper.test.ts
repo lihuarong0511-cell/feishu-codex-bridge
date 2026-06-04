@@ -225,6 +225,55 @@ describe('dispatch helper', () => {
     await expect(readFile(join(project.path, 'reviews', 'T-001-review.md'), 'utf8')).resolves.toMatch(/事实准确性/);
   });
 
+  it('does not append duplicate progress and handoff records for repeated identical reviews', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'feishu-dispatch-review-idempotent-'));
+    const manager = new DispatchManager({
+      projectsDir: join(root, 'projects'),
+      codexBin: 'codex',
+      defaultCwd: root,
+    });
+    const project = await manager.createProject('review idempotent', '验证重复验收不会重复追加记录');
+    await manager.addTask(project.slug, '重复验收', '写完整结果并重复验收');
+    await writeFile(
+      join(project.path, 'outputs', 'T-001-result.md'),
+      [
+        '## 核心结论',
+        '可以验收。',
+        '',
+        '## 执行过程摘要',
+        '已完成。',
+        '',
+        '## 产出或发现',
+        '有结果。',
+        '',
+        '## 风险/阻塞',
+        '暂无。',
+        '',
+        '## 下一步建议',
+        '主控合并。',
+        '',
+        '## 自动复核',
+        '- 事实准确性：通过。',
+        '- 逻辑完整性：通过。',
+        '- 执行可行性：通过。',
+        '- 表达质量：通过。',
+        '- 遗漏风险：通过。',
+        '- 方案影响：通过。',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    await manager.markTask(project.slug, 'T-001', 'reviewing');
+
+    await manager.reviewTask(project.slug, 'T-001');
+    await manager.reviewTask(project.slug, 'T-001');
+
+    const progress = await readFile(join(project.path, 'progress', 'T-001.md'), 'utf8');
+    const handoff = await readFile(join(project.path, 'handoff.md'), 'utf8');
+    expect((progress.match(/\[accepted\]/g) ?? [])).toHaveLength(1);
+    expect((handoff.match(/## .* T-001 重复验收/g) ?? [])).toHaveLength(1);
+  });
+
   it('requires worker self-review against Huaring quality dimensions', async () => {
     const root = await mkdtemp(join(tmpdir(), 'feishu-dispatch-review-rubric-'));
     const manager = new DispatchManager({

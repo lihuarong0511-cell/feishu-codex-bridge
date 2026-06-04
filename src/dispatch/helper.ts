@@ -716,6 +716,12 @@ export class DispatchManager {
     if (overreachFiles.length) findings.push(`发现越权写入风险：${overreachFiles.join('、')}`);
     const statusText = findings.length ? 'rework' : 'accepted';
     const reviewFile = `reviews/${task.id}-review.md`;
+    const previousReviewFindings = task.reviewFindings ?? [];
+    const duplicateReview =
+      (task.status === statusText || task.status === 'accepted' || task.status === 'rework') &&
+      task.review === reviewFile &&
+      previousReviewFindings.length === findings.length &&
+      previousReviewFindings.every((item, index) => item === findings[index]);
     await writeFile(
       join(projectPath, reviewFile),
       [
@@ -756,8 +762,10 @@ export class DispatchManager {
       return { ...task };
     });
     await writeWorkerState(projectPath, updated, statusText, '主控验收完成。');
-    await appendProgress(projectPath, task.id, statusText, `主控自动验收：${statusText === 'accepted' ? '通过。' : '需返工。'}`);
-    await appendHandoff(projectPath, updated, statusText, reviewFile, findings);
+    if (!duplicateReview) {
+      await appendProgress(projectPath, task.id, statusText, `主控自动验收：${statusText === 'accepted' ? '通过。' : '需返工。'}`);
+      await appendHandoff(projectPath, updated, statusText, reviewFile, findings);
+    }
     return { task: updated, status: statusText, findings, reviewFile };
   }
 
