@@ -63,6 +63,20 @@ describe('health evaluation', () => {
     });
   });
 
+  it('treats recent inbound events as websocket activity when the connected event rolled out of the log tail', () => {
+    const result = evaluateHealth({
+      ...base,
+      recentLogLines: [
+        '{"ts":"2026-06-04T12:13:03.935Z","phase":"intake","event":"enter"}',
+        '{"ts":"2026-06-04T12:13:04.543Z","phase":"agent","event":"spawn","obsidianMcpEnabled":false}',
+      ],
+    });
+
+    expect(result.checks.find((check) => check.name === 'websocket connection')).toMatchObject({
+      status: 'ok',
+    });
+  });
+
   it('formats a compact report with a nonzero-ready summary', () => {
     const report = formatHealthReport(evaluateHealth(base));
 

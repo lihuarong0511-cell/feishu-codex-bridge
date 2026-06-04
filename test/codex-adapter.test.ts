@@ -86,8 +86,8 @@ describe('codex adapter args', () => {
     );
     await chmod(fakeCodex, 0o755);
 
-    const infoSpy = vi.spyOn(log, 'info');
-    const warnSpy = vi.spyOn(log, 'warn');
+    const infoSpy = vi.spyOn(log, 'info').mockImplementation(() => {});
+    const warnSpy = vi.spyOn(log, 'warn').mockImplementation(() => {});
     try {
       const run = new CodexAdapter({ binary: fakeCodex }).run({
         prompt: 'trigger stderr',

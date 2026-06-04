@@ -116,9 +116,15 @@ function evaluateDistMarkers(markers: HealthInput['distMarkers']): HealthCheck {
 
 function evaluateWebsocket(lines: string[]): HealthCheck {
   const connected = lines.some((line) => line.includes('"phase":"ws"') && line.includes('"event":"connected"'));
-  return connected
-    ? { name: 'websocket connection', status: 'ok', detail: 'recent ws connected event found' }
-    : { name: 'websocket connection', status: 'warn', detail: 'no recent ws connected event in log tail' };
+  if (connected) {
+    return { name: 'websocket connection', status: 'ok', detail: 'recent ws connected event found' };
+  }
+  const activeInbound = lines.some((line) =>
+    (line.includes('"phase":"intake"') && line.includes('"event":"enter"')) ||
+    (line.includes('"phase":"cardAction"') && line.includes('"event":"cmd"')));
+  return activeInbound
+    ? { name: 'websocket connection', status: 'ok', detail: 'recent inbound event found' }
+    : { name: 'websocket connection', status: 'warn', detail: 'no recent ws or inbound event in log tail' };
 }
 
 function evaluateAgentSpawn(lines: string[]): HealthCheck {
